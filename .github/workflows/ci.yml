@@ -1,0 +1,46 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      # The harness must be green even though the suite is not: it tells
+      # "the tooling is broken" apart from "the API does not exist yet".
+      - name: Harness self-check
+        run: npm run selfcheck
+
+      # Fails on any undefined or ambiguous step, which is a defect in the
+      # suite rather than the intended red state.
+      - name: Validate every step is wired
+        run: NODE_OPTIONS="--import tsx" npx cucumber-js --dry-run --format summary
+
+      # Expected red until the API exists. Non-blocking on purpose - flip
+      # continue-on-error off in the same commit that lands the implementation.
+      - name: Specification suite
+        continue-on-error: true
+        run: npm test
+
+      - name: Publish report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cucumber-report
+          path: reports/
+          if-no-files-found: ignore

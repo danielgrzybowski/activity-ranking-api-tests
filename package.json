@@ -1,0 +1,28 @@
+{
+  "name": "activity-ranking-api-tests",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Spec-first BDD suite for the Activity Ranking API (city-based 7-day weather activity rankings).",
+  "engines": {
+    "node": ">=20.11"
+  },
+  "scripts": {
+    "test": "NODE_OPTIONS=\"--import tsx\" cucumber-js",
+    "test:smoke": "NODE_OPTIONS=\"--import tsx\" cucumber-js --tags @smoke",
+    "test:contract": "NODE_OPTIONS=\"--import tsx\" cucumber-js --tags @contract",
+    "test:scoring": "NODE_OPTIONS=\"--import tsx\" cucumber-js --tags @scoring",
+    "test:resilience": "NODE_OPTIONS=\"--import tsx\" cucumber-js --tags @resilience",
+    "test:live": "NODE_OPTIONS=\"--import tsx\" cucumber-js --profile live",
+    "selfcheck": "tsx scripts/selfcheck.ts",
+    "stub-upstream": "tsx scripts/stub-upstream.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@cucumber/cucumber": "^11.3.0",
+    "@types/node": "^22.13.5",
+    "tsx": "^4.19.3",
+    "typescript": "^5.7.3",
+    "zod": "^3.24.2"
+  }
+}

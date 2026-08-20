@@ -1,0 +1,288 @@
+openapi: 3.1.0
+info:
+  title: Activity Ranking API
+  version: 1.0.0
+  description: >
+    Ranks Skiing, Surfing, Outdoor Sightseeing and Indoor Sightseeing across a
+    seven-day Open-Meteo forecast for a city or town.
+
+    No implementation exists yet. This document and the Cucumber suite in this
+    repository are the specification; where they disagree, the feature files win.
+
+servers:
+  - url: http://localhost:3000
+    description: Local implementation under test
+
+paths:
+  /health:
+    get:
+      summary: Liveness probe
+      responses:
+        '200':
+          description: The service is up
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status]
+                properties:
+                  status: { type: string, const: ok }
+
+  /v1/locations:
+    get:
+      summary: Search for a city or town by full or partial name
+      description: >
+        Typeahead endpoint. A query that matches nothing returns 200 with an
+        empty list, never 404 - a search that errors on an unfinished word
+        makes the front end flash an error on every keystroke.
+      parameters:
+        - name: q
+          in: query
+          required: true
+          description: Full or partial place name, at least 2 characters after trimming.
+          schema: { type: string, minLength: 2 }
+          example: Lond
+        - name: limit
+          in: query
+          required: false
+          description: Maximum results. Out-of-range values are rejected, not clamped.
+          schema: { type: integer, minimum: 1, maximum: 20, default: 10 }
+      responses:
+        '200':
+          description: Matches, ordered by population descending
+          headers:
+            Cache-Control: { schema: { type: string }, example: 'public, max-age=3600' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LocationsResponse' }
+        '400':
+          description: INVALID_QUERY
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+
+  /v1/rankings:
+    get:
+      summary: Rank activities per day for a location
+      description: >
+        Supply exactly one of locationId or city. An ambiguous city name is a
+        409 carrying the candidates, not a guess.
+      parameters:
+        - name: locationId
+          in: query
+          required: false
+          description: Open-Meteo place id, as returned by /v1/locations.
+          schema: { type: string }
+          example: '2988507'
+        - name: city
+          in: query
+          required: false
+          description: Raw place name. Matched case- and accent-insensitively.
+          schema: { type: string, minLength: 2 }
+          example: Paris
+        - name: days
+          in: query
+          required: false
+          schema: { type: integer, minimum: 1, maximum: 7, default: 7 }
+      responses:
+        '200':
+          description: A ranking for each forecast day
+          headers:
+            Cache-Control: { schema: { type: string }, example: 'public, max-age=900' }
+            Access-Control-Allow-Origin: { schema: { type: string }, example: '*' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RankingsResponse' }
+        '400':
+          description: INVALID_QUERY, MISSING_LOCATION, CONFLICTING_LOCATION_PARAMS or INVALID_DAYS
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        '404':
+          description: LOCATION_NOT_FOUND
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        '409':
+          description: AMBIGUOUS_LOCATION - details.matches carries the candidates
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AmbiguousLocationError' }
+        '502':
+          description: UPSTREAM_UNAVAILABLE - Open-Meteo returned 5xx or unparseable data
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        '503':
+          description: UPSTREAM_RATE_LIMITED
+          headers:
+            Retry-After: { schema: { type: string }, example: '60' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        '504':
+          description: UPSTREAM_TIMEOUT
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+
+components:
+  schemas:
+    Location:
+      type: object
+      additionalProperties: false
+      required:
+        [id, name, country, countryCode, region, latitude, longitude, timezone, population, displayName]
+      properties:
+        id: { type: string, example: '2643743' }
+        name: { type: string, example: London }
+        country: { type: string, example: United Kingdom }
+        countryCode: { type: string, minLength: 2, maxLength: 2, example: GB }
+        region: { type: string, example: England }
+        latitude: { type: number, minimum: -90, maximum: 90 }
+        longitude: { type: number, minimum: -180, maximum: 180 }
+        timezone: { type: string, example: Europe/London }
+        population: { type: [integer, 'null'], minimum: 0 }
+        displayName:
+          type: string
+          description: >
+            Built by the API so a picker can tell three real Londons apart.
+          example: London, England, United Kingdom
+
+    LocationsResponse:
+      type: object
+      additionalProperties: false
+      required: [query, count, results]
+      properties:
+        query:
+          type: string
+          description: Echoed so a typeahead can discard out-of-order responses.
+        count: { type: integer, minimum: 0, description: Always equals results.length }
+        results:
+          type: array
+          items: { $ref: '#/components/schemas/Location' }
+
+    ActivityRanking:
+      type: object
+      additionalProperties: false
+      required: [activity, score, rating, rank, reasoning]
+      properties:
+        activity:
+          type: string
+          enum: [SKIING, SURFING, OUTDOOR_SIGHTSEEING, INDOOR_SIGHTSEEING]
+        score:
+          type: integer
+          minimum: 0
+          maximum: 100
+        rating:
+          type: string
+          enum: [UNSUITABLE, POOR, FAIR, GOOD, EXCELLENT]
+          description: >
+            Derived from score: 0-19 UNSUITABLE, 20-39 POOR, 40-59 FAIR,
+            60-79 GOOD, 80-100 EXCELLENT.
+        rank:
+          type: integer
+          minimum: 1
+          maximum: 4
+          description: >
+            1-4 within the day, by score descending, ties broken alphabetically
+            by activity name.
+        reasoning:
+          type: string
+          maxLength: 160
+          description: >
+            Must name a weather driver or quote a figure. "Suitable" on its own
+            tells the user nothing.
+          example: Clear skies and 22°C.
+
+    DayRanking:
+      type: object
+      additionalProperties: false
+      required: [date, activities]
+      properties:
+        date:
+          type: string
+          pattern: '^\d{4}-\d{2}-\d{2}$'
+          description: Calendar date in the location's timezone.
+        activities:
+          type: array
+          minItems: 4
+          maxItems: 4
+          description: Exactly one entry per activity.
+          items: { $ref: '#/components/schemas/ActivityRanking' }
+
+    RankingsResponse:
+      type: object
+      additionalProperties: false
+      required: [location, generatedAt, forecast, units, days]
+      properties:
+        location: { $ref: '#/components/schemas/Location' }
+        generatedAt: { type: string, format: date-time }
+        forecast:
+          type: object
+          additionalProperties: false
+          required: [source, timezone, days]
+          properties:
+            source: { type: string, const: open-meteo }
+            timezone: { type: string, example: Europe/Paris }
+            days:
+              type: integer
+              minimum: 1
+              maximum: 7
+              description: Always equals days.length.
+        units:
+          type: object
+          additionalProperties: false
+          required: [temperature, precipitation, snowfall, windSpeed]
+          properties:
+            temperature: { type: string, example: °C }
+            precipitation: { type: string, example: mm }
+            snowfall: { type: string, example: cm }
+            windSpeed: { type: string, example: km/h }
+        days:
+          type: array
+          minItems: 1
+          maxItems: 7
+          items: { $ref: '#/components/schemas/DayRanking' }
+
+    ErrorResponse:
+      type: object
+      additionalProperties: false
+      required: [error]
+      properties:
+        error:
+          type: object
+          additionalProperties: false
+          required: [code, message]
+          properties:
+            code:
+              type: string
+              enum:
+                - INVALID_QUERY
+                - MISSING_LOCATION
+                - CONFLICTING_LOCATION_PARAMS
+                - INVALID_DAYS
+                - LOCATION_NOT_FOUND
+                - AMBIGUOUS_LOCATION
+                - UPSTREAM_UNAVAILABLE
+                - UPSTREAM_RATE_LIMITED
+                - UPSTREAM_TIMEOUT
+            message: { type: string }
+            details: { type: object }
+
+    AmbiguousLocationError:
+      allOf:
+        - $ref: '#/components/schemas/ErrorResponse'
+        - type: object
+          properties:
+            error:
+              type: object
+              properties:
+                details:
+                  type: object
+                  required: [matches]
+                  properties:
+                    matches:
+                      type: array
+                      minItems: 2
+                      items: { $ref: '#/components/schemas/Location' }
