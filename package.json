@@ -8,19 +8,22 @@
     "node": ">=20.11"
   },
   "scripts": {
-    "test": "NODE_OPTIONS=\"--import tsx\" cucumber-js",
-    "test:smoke": "NODE_OPTIONS=\"--import tsx\" cucumber-js --tags @smoke",
-    "test:contract": "NODE_OPTIONS=\"--import tsx\" cucumber-js --tags @contract",
-    "test:scoring": "NODE_OPTIONS=\"--import tsx\" cucumber-js --tags @scoring",
-    "test:resilience": "NODE_OPTIONS=\"--import tsx\" cucumber-js --tags @resilience",
-    "test:live": "NODE_OPTIONS=\"--import tsx\" cucumber-js --profile live",
+    "test": "bddgen && playwright test --project=spec",
+    "test:smoke": "bddgen && playwright test --project=spec --grep @smoke",
+    "test:contract": "bddgen && playwright test --project=spec --grep @contract",
+    "test:scoring": "bddgen && playwright test --project=spec --grep @scoring",
+    "test:resilience": "bddgen && playwright test --project=spec --grep @resilience",
+    "test:live": "bddgen && playwright test --project=live",
+    "test:report": "playwright show-report reports/playwright",
+    "validate": "bddgen",
     "selfcheck": "tsx scripts/selfcheck.ts",
     "stub-upstream": "tsx scripts/stub-upstream.ts",
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {
-    "@cucumber/cucumber": "^11.3.0",
+    "@playwright/test": "^1.62.1",
     "@types/node": "^22.13.5",
+    "playwright-bdd": "^9.2.0",
     "tsx": "^4.19.3",
     "typescript": "^5.7.3",
     "zod": "^3.24.2"

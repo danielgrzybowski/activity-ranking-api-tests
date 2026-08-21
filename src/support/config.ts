@@ -16,7 +16,7 @@ function int(name: string, fallback: number): number {
 }
 
 export const config: SuiteConfig = {
-  apiBaseUrl: (process.env['API_BASE_URL'] ?? 'http://localhost:3000').replace(/\/$/, ''),
+  apiBaseUrl: (process.env['API_BASE_URL'] ?? 'http://127.0.0.1:3000').replace(/\/$/, ''),
   fakeUpstreamPort: int('FAKE_OPEN_METEO_PORT', 8787),
   apiTimeoutMs: int('API_TIMEOUT_MS', 5000),
 };

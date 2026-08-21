@@ -1,19 +1,23 @@
 # Activity Ranking API — spec-first BDD suite
 
-A Cucumber/TypeScript suite for the **Activity Ranking API**: give it a city, get back seven days
+A Gherkin/TypeScript suite for the **Activity Ranking API**: give it a city, get back seven days
 ranked across Skiing, Surfing, Outdoor Sightseeing and Indoor Sightseeing, each with a suitability
 and a plain-English reason.
+
+The `.feature` files are executed by **Playwright Test** via
+[`playwright-bdd`](https://github.com/vitalets/playwright-bdd), which compiles each scenario into a
+Playwright test. Gherkin stays the source of truth; Playwright supplies the runner, the fixtures,
+the HTML report and the trace viewer.
 
 The API does not exist yet. This repository is the specification, written as executable Gherkin,
 and it is **red on purpose** — 104 scenarios that describe the API someone is about to build.
 
 ```
-104 scenarios (104 failed)
-620 steps (104 failed, 516 skipped)
+104 failed
 
-Given the Activity Ranking API is available
-  ApiUnreachableError: Could not reach the Activity Ranking API at http://localhost:3000/health.
+  ApiUnreachableError: Could not reach the Activity Ranking API at http://127.0.0.1:3000/health.
     This suite is spec-first: it describes an API that does not exist yet.
+    Start the implementation (or point API_BASE_URL at it) to turn these red scenarios green.
 ```
 
 A red suite is easy to write and worthless if nobody checks the assertions are satisfiable. See
@@ -27,8 +31,13 @@ did about that.
 ```bash
 npm install
 npm run selfcheck   # 14 checks on the harness itself — green today
+npm run validate    # compiles Gherkin to tests; fails on any unwired step
 npm test            # 104 scenarios — red today, by design
+npm run test:report # opens the Playwright HTML report
 ```
+
+No browser binaries are needed — this is an API suite and uses Playwright's `APIRequestContext`,
+not a page.
 
 `npm run selfcheck` is the one that should always be green. It exercises the Open-Meteo test double
 and the contract schemas without touching the API under test, so "is my tooling broken?" and "does
@@ -36,18 +45,24 @@ the API exist yet?" never get confused with each other.
 
 | Command | What it does |
 | --- | --- |
-| `npm test` | The whole suite against `API_BASE_URL` (default `http://localhost:3000`) |
+| `npm test` | The whole suite against `API_BASE_URL` (default `http://127.0.0.1:3000`) |
 | `npm run test:smoke` | The handful of `@smoke` scenarios — a build gate |
 | `npm run test:contract` | Response shapes, headers, error envelope |
 | `npm run test:scoring` | The ranking rules per activity |
 | `npm run test:resilience` | Open-Meteo failure modes |
 | `npm run test:live` | The `@live` scenarios against the **real** Open-Meteo |
+| `npm run validate` | `bddgen` alone — the fast "is the suite well-formed?" check |
+| `npm run test:report` | Opens the HTML report from the last run |
 | `npm run selfcheck` | Harness self-test — no API required |
 | `npm run stub-upstream` | Runs the Open-Meteo double standalone, for building against |
 | `npm run typecheck` | `tsc --noEmit` |
 
-Configuration is via env vars, see `.env.example`. On Windows the `npm test` script needs
-`NODE_OPTIONS` set differently — use `npx cross-env` or run cucumber-js from Git Bash.
+Every `test:*` script runs `bddgen` first, which regenerates `.features-gen/` from the `.feature`
+files. That directory is build output and is git-ignored — never edit it.
+
+Configuration is via env vars, see `.env.example`. `API_BASE_URL` defaults to `127.0.0.1` rather
+than `localhost` on purpose: Playwright resolves `localhost` to `::1` and, unlike `fetch` or `curl`,
+does not fall back to IPv4 when nothing is listening there.
 
 ---
 
@@ -65,7 +80,8 @@ Configuration is via env vars, see `.env.example`. On Windows the `npm test` scr
 | `live-open-meteo.feature` | 3 | `@live` — drift check against the real service |
 
 Tags: `@smoke` `@contract` `@scoring` `@resilience` `@performance` `@errors` `@locations`
-`@rankings` `@live`. `@live` is excluded from the default profile.
+`@rankings` `@live`. Gherkin tags become Playwright tags, so `npx playwright test --grep @smoke`
+works directly. `@live` lives in its own Playwright project and is excluded from `npm test`.
 
 ### Two kinds of assertion, deliberately
 
@@ -86,9 +102,29 @@ implementation rather than a statement of intent:
 
 Some rules can't be reached by a scenario that names them. The alphabetical tie-break only matters
 when two activities happen to score the same, and no weather fixture can force that from the
-outside. `src/support/invariants.ts` therefore runs after **every** scenario that produced a 200
-from `/v1/rankings`, holding it to the structural rules — rank contiguity, score/rank monotonicity,
-the tie-break, score↔rating agreement, the reasoning budget, the indoor floor.
+outside. `src/support/invariants.ts` therefore runs in the teardown of the `api` fixture, against
+**every** 200 the suite ever receives from `/v1/rankings` — rank contiguity, score/rank
+monotonicity, the tie-break, score↔rating agreement, the reasoning budget, the indoor floor.
+
+### Why the runner is Playwright, and what it does not buy
+
+`playwright-bdd` compiles `features/**/*.feature` into `.features-gen/`, so the Gherkin is still
+what runs. What the runner adds over a plain Cucumber setup:
+
+- **Fixtures instead of a World.** Scenario state is a typed `ApiSession` fixture, and the
+  Open-Meteo double is a worker-scoped fixture. Setup and teardown are the runner's job, not a
+  hook file's, and each step declares exactly what it needs: `async ({ api, upstream }) => …`.
+- **Traces and an HTML report.** Every request is recorded; `npm run test:report` shows the failing
+  step with the response and the upstream calls attached.
+- **`bddgen` as a build-time check.** With `missingSteps: 'fail-on-gen'` and `arityCheck`, an
+  unwired or wrong-arity step fails before a single test runs, rather than showing up as a skipped
+  scenario in a report nobody reads to the bottom.
+
+What it does **not** buy here is parallelism. The Open-Meteo double is one shared, mutable process
+that the API under test reaches on a fixed port, so parallel scenarios would overwrite each other's
+weather. `workers: 1` is set in `playwright.config.ts` with that reasoning written next to it. This
+is a property of stubbing a separately-deployed service's upstream, not of the runner — the same
+constraint applied under Cucumber. At ~4s for 104 scenarios there is nothing to gain anyway.
 
 ---
 
@@ -293,6 +329,7 @@ notices:
 | Rate-limit 429 mapped to a generic 502 | **caught** — 1 scenario |
 | `days` range validation removed | **caught** — 4 scenarios |
 | Ambiguous city resolved silently instead of 409 | **caught** — 1 scenario |
+| `EXCELLENT` band boundary moved 80 → 78 | **caught** — 4 scenarios |
 | Indoor floor removed | not caught — *equivalent mutant* |
 | Alphabetical tie-break removed | not caught — *see below* |
 
@@ -355,32 +392,45 @@ model is tuned, and would fail for the wrong reason.
 consecutive. A city crossing a DST boundary mid-forecast is a real case I'd add next; I'd need a
 decision on whether "today" means the user's timezone or the destination's before writing it.
 
-**`--dry-run` is in CI, but the suite is not a gate yet.** Until an implementation exists, CI runs
-the typecheck, the harness self-check and a dry-run that fails on any undefined or ambiguous step.
-The suite itself runs in a non-blocking step so the intended red is visible without breaking the
-build. Flipping it to blocking is a one-line change once the API lands.
+**The suite is not a CI gate yet.** Until an implementation exists, CI runs the typecheck, the
+harness self-check and `bddgen`, which fails on any undefined or wrong-arity step. The suite itself
+runs in a non-blocking step so the intended red is visible without breaking the build. Flipping it
+to blocking is a one-line change once the API lands.
+
+**Retries are off.** Playwright's default instinct is to retry a flaky test; a spec suite that is
+red by design would just take three times as long to say so. Once the API exists and the suite is a
+gate, `retries: 1` on CI would be reasonable — the `@live` project especially.
 
 ---
 
 ## Project layout
 
 ```
+playwright.config.ts          runner config; two BDD projects (spec, live)
 features/
   *.feature                   the specification
   step_definitions/           thin glue: request, assert, nothing clever
 src/support/
+  fixtures.ts                 the ApiSession fixture, the upstream fixture, Given/When/Then
   domain.ts                   activities, rating bands, budgets — the vocabulary
   schemas.ts                  zod contract schemas (strict: extra fields are a contract change)
   invariants.ts               rules held against every 200, not just where named
   fake-open-meteo.ts          the upstream test double
-  api-client.ts               fetch wrapper with timing and a legible unreachable error
+  api-client.ts               request wrapper with timing and a legible unreachable error
   assertions.ts               assertions whose failure messages name the reason
   fixtures/                   weather profiles and places
 scripts/
   selfcheck.ts                proves the harness works without the API
   stub-upstream.ts            runs the double standalone
 docs/openapi.yaml             the contract, machine-readable
+.features-gen/                build output from bddgen — git-ignored, never edited
 ```
+
+Everything under `src/support` except `fixtures.ts` and `api-client.ts` is runner-agnostic — no
+import from Playwright or Cucumber. That was not an accident: this suite was first written on
+Cucumber and moved to Playwright, and the move touched the config, the fixtures and the step
+signatures. The domain vocabulary, the schemas, the invariants, the assertions and the weather
+fixtures were untouched, and the `.feature` files did not change by a single character.
 
 Step definitions stay thin on purpose: a step reads the Gherkin, makes one call or one assertion,
 and delegates anything shared to `src/support`. Logic that drifts into step definitions is logic

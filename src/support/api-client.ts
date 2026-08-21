@@ -1,3 +1,4 @@
+import type { APIRequestContext } from '@playwright/test';
 import { config } from './config';
 
 export interface ApiResponse {
@@ -37,18 +38,28 @@ export function buildUrl(path: string, query: RequestOptions['query'] = {}): str
   return url.toString();
 }
 
-export async function callApi(options: RequestOptions): Promise<ApiResponse> {
+/**
+ * Calls the API through Playwright's request context rather than bare fetch,
+ * so every call lands in the trace and the HTML report alongside its
+ * assertions. The returned shape is deliberately runner-agnostic: the
+ * assertion helpers and invariants know nothing about Playwright.
+ */
+export async function callApi(
+  request: APIRequestContext,
+  options: RequestOptions,
+): Promise<ApiResponse> {
   const url = buildUrl(options.path, options.query);
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), config.apiTimeoutMs);
   const startedAt = performance.now();
 
   try {
-    const response = await fetch(url, {
+    const response = await request.fetch(url, {
       method: options.method ?? 'GET',
       headers: { accept: 'application/json', ...options.headers },
-      signal: controller.signal,
+      timeout: config.apiTimeoutMs,
+      // Non-2xx is data here, not an exception: most scenarios assert on it.
+      failOnStatusCode: false,
     });
+
     const rawBody = await response.text();
     const durationMs = performance.now() - startedAt;
 
@@ -59,10 +70,15 @@ export async function callApi(options: RequestOptions): Promise<ApiResponse> {
       body = undefined;
     }
 
-    return { status: response.status, headers: response.headers, body, rawBody, durationMs, url };
+    return {
+      status: response.status(),
+      headers: new Headers(response.headers()),
+      body,
+      rawBody,
+      durationMs,
+      url,
+    };
   } catch (error) {
     throw new ApiUnreachableError(url, error);
-  } finally {
-    clearTimeout(timer);
   }
 }

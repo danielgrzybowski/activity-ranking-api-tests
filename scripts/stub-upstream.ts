@@ -6,7 +6,7 @@
  *
  *   npm run stub-upstream
  *
- * Do not run it at the same time as the Cucumber suite - the suite starts its
+ * Do not run it at the same time as the spec suite - the suite starts its
  * own instance on the same port.
  */
 

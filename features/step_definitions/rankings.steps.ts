@@ -1,11 +1,5 @@
-import { DataTable, Then, When } from '@cucumber/cucumber';
-import { callApi } from '../../src/support/api-client';
-import {
-  expectEqual,
-  expectMentionsAny,
-  expectTrue,
-  parseWith,
-} from '../../src/support/assertions';
+import type { DataTable } from 'playwright-bdd';
+import { expectEqual, expectMentionsAny, expectTrue, parseWith } from '../../src/support/assertions';
 import {
   ACTIVITIES,
   RATINGS,
@@ -17,7 +11,7 @@ import {
   type Activity,
   type Rating,
 } from '../../src/support/domain';
-import { fakeOpenMeteo } from '../../src/support/fake-open-meteo';
+import { Then, When } from '../../src/support/fixtures';
 import {
   AmbiguousLocationDetailsSchema,
   RankingsResponseSchema,
@@ -25,41 +19,15 @@ import {
   type DayRanking,
   type RankingsResponse,
 } from '../../src/support/schemas';
-import type { ActivityRankingWorld } from '../../src/support/world';
 
 const RANKINGS_PATH = '/v1/rankings';
 
 /** Vocabulary a reasoning string must draw on to actually explain anything. */
 const WEATHER_VOCABULARY = [
-  'snow',
-  'rain',
-  'shower',
-  'precipitation',
-  'wind',
-  'gust',
-  'breeze',
-  'calm',
-  'flat',
-  'swell',
-  'sun',
-  'clear',
-  'cloud',
-  'overcast',
-  'fog',
-  'storm',
-  'thunder',
-  'temperature',
-  '°c',
-  'degrees',
-  'warm',
-  'hot',
-  'heat',
-  'mild',
-  'cold',
-  'freezing',
-  'dry',
-  'wet',
-  'humid',
+  'snow', 'rain', 'shower', 'precipitation', 'wind', 'gust', 'breeze', 'calm',
+  'flat', 'swell', 'sun', 'clear', 'cloud', 'overcast', 'fog', 'storm',
+  'thunder', 'temperature', '°c', 'degrees', 'warm', 'hot', 'heat', 'mild',
+  'cold', 'freezing', 'dry', 'wet', 'humid',
 ];
 
 function assertActivity(name: string): Activity {
@@ -105,69 +73,60 @@ function describeDay(dayRanking: DayRanking): string {
 
 // --- requests ---------------------------------------------------------------
 
-When(
-  'I request rankings for location id {string}',
-  async function (this: ActivityRankingWorld, locationId: string) {
-    this.response = await callApi({ path: RANKINGS_PATH, query: { locationId } });
-  },
-);
+When('I request rankings for location id {string}', async ({ api }, locationId: string) => {
+  await api.call({ path: RANKINGS_PATH, query: { locationId } });
+});
 
-When(
-  'I request rankings for location id {string} again',
-  async function (this: ActivityRankingWorld, locationId: string) {
-    this.repeatResponse = await callApi({ path: RANKINGS_PATH, query: { locationId } });
-  },
-);
+When('I request rankings for location id {string} again', async ({ api }, locationId: string) => {
+  await api.callAgain({ path: RANKINGS_PATH, query: { locationId } });
+});
 
 When(
   'I request rankings for location id {string} over {int} days',
-  async function (this: ActivityRankingWorld, locationId: string, days: number) {
-    this.response = await callApi({ path: RANKINGS_PATH, query: { locationId, days } });
+  async ({ api }, locationId: string, days: number) => {
+    await api.call({ path: RANKINGS_PATH, query: { locationId, days } });
   },
 );
 
 // Quoted day counts are the invalid ones: "0", "8", "week".
 When(
   'I request rankings for location id {string} over {string} days',
-  async function (this: ActivityRankingWorld, locationId: string, days: string) {
-    this.response = await callApi({ path: RANKINGS_PATH, query: { locationId, days } });
+  async ({ api }, locationId: string, days: string) => {
+    await api.call({ path: RANKINGS_PATH, query: { locationId, days } });
   },
 );
 
-When(
-  'I request rankings for the city {string}',
-  async function (this: ActivityRankingWorld, city: string) {
-    this.response = await callApi({ path: RANKINGS_PATH, query: { city } });
-  },
-);
+When('I request rankings for the city {string}', async ({ api }, city: string) => {
+  await api.call({ path: RANKINGS_PATH, query: { city } });
+});
 
-When('I request rankings with no location', async function (this: ActivityRankingWorld) {
-  this.response = await callApi({ path: RANKINGS_PATH });
+When('I request rankings with no location', async ({ api }) => {
+  await api.call({ path: RANKINGS_PATH });
 });
 
 When(
   'I request rankings for location id {string} and the city {string}',
-  async function (this: ActivityRankingWorld, locationId: string, city: string) {
-    this.response = await callApi({ path: RANKINGS_PATH, query: { locationId, city } });
+  async ({ api }, locationId: string, city: string) => {
+    await api.call({ path: RANKINGS_PATH, query: { locationId, city } });
   },
 );
 
 // --- contract-level assertions ---------------------------------------------
 
-Then('the response matches the rankings contract', function (this: ActivityRankingWorld) {
-  parseWith(RankingsResponseSchema, this.lastResponse.body, 'The rankings response');
+Then('the response matches the rankings contract', async ({ api }) => {
+  parseWith(RankingsResponseSchema, api.lastResponse.body, 'The rankings response');
 });
 
 Then(
   'the ranking covers {int} consecutive days starting from the first forecast day',
-  function (this: ActivityRankingWorld, expectedCount: number) {
-    const days = this.rankings().days;
+  async ({ api, upstream }, expectedCount: number) => {
+    const days = api.rankings().days;
     expectTrue(
       days.length === expectedCount,
       `Expected ${expectedCount} day(s) of rankings, got ${days.length}.`,
     );
 
-    const start = new Date(`${fakeOpenMeteo.firstForecastDate}T00:00:00Z`);
+    const start = new Date(`${upstream.firstForecastDate}T00:00:00Z`);
     const expected = Array.from({ length: expectedCount }, (_, i) =>
       new Date(start.getTime() + i * 86_400_000).toISOString().slice(0, 10),
     );
@@ -180,9 +139,9 @@ Then(
   },
 );
 
-Then('every day ranks all four activities:', function (this: ActivityRankingWorld, table: DataTable) {
+Then('every day ranks all four activities:', async ({ api }, table: DataTable) => {
   const expected = table.raw().map((row) => assertActivity(row[0]!));
-  for (const dayRanking of this.rankings().days) {
+  for (const dayRanking of api.rankings().days) {
     const present = dayRanking.activities.map((a) => a.activity);
     const missing = expected.filter((a) => !present.includes(a));
     expectTrue(
@@ -198,10 +157,10 @@ Then('every day ranks all four activities:', function (this: ActivityRankingWorl
 
 Then(
   'every activity entry has a date, an activity name, a suitability score and a rating',
-  function (this: ActivityRankingWorld) {
+  async ({ api }) => {
     // The schema enforces types; this checks the date is carried per day and
     // that scores are real numbers a UI can put on a bar.
-    for (const dayRanking of this.rankings().days) {
+    for (const dayRanking of api.rankings().days) {
       expectTrue(
         /^\d{4}-\d{2}-\d{2}$/.test(dayRanking.date),
         `Expected an ISO date on each day, got "${dayRanking.date}"`,
@@ -220,28 +179,25 @@ Then(
   },
 );
 
-Then(
-  'every reasoning is at most {int} characters',
-  function (this: ActivityRankingWorld, limit: number) {
-    for (const dayRanking of this.rankings().days) {
-      for (const entry of dayRanking.activities) {
-        expectTrue(
-          entry.reasoning.length <= limit,
-          `${entry.activity} on ${dayRanking.date} has a ${entry.reasoning.length}-character reasoning, ` +
-            `over the ${limit}-character budget for a card: "${entry.reasoning}"`,
-        );
-      }
+Then('every reasoning is at most {int} characters', async ({ api }, limit: number) => {
+  for (const dayRanking of api.rankings().days) {
+    for (const entry of dayRanking.activities) {
+      expectTrue(
+        entry.reasoning.length <= limit,
+        `${entry.activity} on ${dayRanking.date} has a ${entry.reasoning.length}-character reasoning, ` +
+          `over the ${limit}-character budget for a card: "${entry.reasoning}"`,
+      );
     }
-    expectEqual(limit, REASONING_MAX_LENGTH, 'the documented reasoning budget');
-  },
-);
+  }
+  expectEqual(limit, REASONING_MAX_LENGTH, 'the documented reasoning budget');
+});
 
 /**
  * "Suitable" on its own tells the user nothing. Every reasoning has to name
  * a driver or quote a number, which is what makes the ranking explainable.
  */
-Then('every reasoning refers to at least one weather driver', function (this: ActivityRankingWorld) {
-  for (const dayRanking of this.rankings().days) {
+Then('every reasoning refers to at least one weather driver', async ({ api }) => {
+  for (const dayRanking of api.rankings().days) {
     for (const entry of dayRanking.activities) {
       const text = entry.reasoning.toLowerCase();
       const namesDriver = WEATHER_VOCABULARY.some((word) => text.includes(word));
@@ -254,23 +210,20 @@ Then('every reasoning refers to at least one weather driver', function (this: Ac
   }
 });
 
-Then(
-  'every day numbers its activities 1 to 4 with no gaps or duplicates',
-  function (this: ActivityRankingWorld) {
-    for (const dayRanking of this.rankings().days) {
-      const ranks = dayRanking.activities.map((a) => a.rank).sort((a, b) => a - b);
-      const expected = Array.from({ length: dayRanking.activities.length }, (_, i) => i + 1);
-      expectTrue(
-        JSON.stringify(ranks) === JSON.stringify(expected),
-        `Day ${dayRanking.date} has ranks [${ranks.join(', ')}], expected [${expected.join(', ')}]. ` +
-          describeDay(dayRanking),
-      );
-    }
-  },
-);
+Then('every day numbers its activities 1 to 4 with no gaps or duplicates', async ({ api }) => {
+  for (const dayRanking of api.rankings().days) {
+    const ranks = dayRanking.activities.map((a) => a.rank).sort((a, b) => a - b);
+    const expected = Array.from({ length: dayRanking.activities.length }, (_, i) => i + 1);
+    expectTrue(
+      JSON.stringify(ranks) === JSON.stringify(expected),
+      `Day ${dayRanking.date} has ranks [${ranks.join(', ')}], expected [${expected.join(', ')}]. ` +
+        describeDay(dayRanking),
+    );
+  }
+});
 
-Then('within each day a better score never has a worse rank', function (this: ActivityRankingWorld) {
-  for (const dayRanking of this.rankings().days) {
+Then('within each day a better score never has a worse rank', async ({ api }) => {
+  for (const dayRanking of api.rankings().days) {
     for (const a of dayRanking.activities) {
       for (const b of dayRanking.activities) {
         if (a.score > b.score) {
@@ -285,12 +238,10 @@ Then('within each day a better score never has a worse rank', function (this: Ac
   }
 });
 
-Then('activities tied on score are ordered alphabetically', function (this: ActivityRankingWorld) {
-  for (const dayRanking of this.rankings().days) {
+Then('activities tied on score are ordered alphabetically', async ({ api }) => {
+  for (const dayRanking of api.rankings().days) {
     const expected = expectedRankOrder(dayRanking.activities);
-    const actual = [...dayRanking.activities]
-      .sort((a, b) => a.rank - b.rank)
-      .map((a) => a.activity);
+    const actual = [...dayRanking.activities].sort((a, b) => a.rank - b.rank).map((a) => a.activity);
     expectTrue(
       JSON.stringify(actual) === JSON.stringify(expected),
       `On ${dayRanking.date} the documented tie-break (score desc, then activity name) gives ` +
@@ -299,9 +250,9 @@ Then('activities tied on score are ordered alphabetically', function (this: Acti
   }
 });
 
-Then('every rating matches the documented band for its score', function (this: ActivityRankingWorld) {
+Then('every rating matches the documented band for its score', async ({ api }) => {
   const bands = RATING_BANDS.map((b) => `${b.rating} ${b.min}-${b.max}`).join(', ');
-  for (const dayRanking of this.rankings().days) {
+  for (const dayRanking of api.rankings().days) {
     for (const entry of dayRanking.activities) {
       const expected = ratingForScore(entry.score);
       expectTrue(
@@ -313,18 +264,18 @@ Then('every rating matches the documented band for its score', function (this: A
   }
 });
 
-Then('the resolved location is {string}', function (this: ActivityRankingWorld, displayName: string) {
-  expectEqual(this.rankings().location.displayName, displayName, 'the resolved location');
+Then('the resolved location is {string}', async ({ api }, displayName: string) => {
+  expectEqual(api.rankings().location.displayName, displayName, 'the resolved location');
 });
 
-Then('the resolved location id is {string}', function (this: ActivityRankingWorld, id: string) {
-  expectEqual(this.rankings().location.id, id, 'the resolved location id');
+Then('the resolved location id is {string}', async ({ api }, id: string) => {
+  expectEqual(api.rankings().location.id, id, 'the resolved location id');
 });
 
 Then(
   'the response declares units for temperature, precipitation, snowfall and wind speed',
-  function (this: ActivityRankingWorld) {
-    const units = this.rankings().units;
+  async ({ api }) => {
+    const units = api.rankings().units;
     for (const [key, value] of Object.entries(units)) {
       expectTrue(
         typeof value === 'string' && value.length > 0,
@@ -334,42 +285,39 @@ Then(
   },
 );
 
-Then('the forecast source is {string}', function (this: ActivityRankingWorld, source: string) {
-  expectEqual(this.rankings().forecast.source, source, 'the forecast source');
+Then('the forecast source is {string}', async ({ api }, source: string) => {
+  expectEqual(api.rankings().forecast.source, source, 'the forecast source');
 });
 
-Then('the forecast timezone is {string}', function (this: ActivityRankingWorld, timezone: string) {
-  expectEqual(this.rankings().forecast.timezone, timezone, 'the forecast timezone');
+Then('the forecast timezone is {string}', async ({ api }, timezone: string) => {
+  expectEqual(api.rankings().forecast.timezone, timezone, 'the forecast timezone');
 });
 
-Then(
-  'both responses are identical apart from the generation timestamp',
-  function (this: ActivityRankingWorld) {
-    const second = this.repeatResponse;
-    expectTrue(second !== undefined, 'The scenario did not make a second request.');
+Then('both responses are identical apart from the generation timestamp', async ({ api }) => {
+  const second = api.repeatResponse;
+  expectTrue(second !== undefined, 'The scenario did not make a second request.');
 
-    const strip = (body: unknown): string => {
-      const clone = JSON.parse(JSON.stringify(body)) as Record<string, unknown>;
-      delete clone['generatedAt'];
-      return JSON.stringify(clone);
-    };
+  const strip = (body: unknown): string => {
+    const clone = JSON.parse(JSON.stringify(body)) as Record<string, unknown>;
+    delete clone['generatedAt'];
+    return JSON.stringify(clone);
+  };
 
-    expectTrue(
-      strip(this.lastResponse.body) === strip(second!.body),
-      'The same forecast produced two different rankings. Nothing downstream - caching, ' +
-        'sharing a link, comparing two tabs - can be trusted if the ranking is not deterministic.',
-    );
-  },
-);
+  expectTrue(
+    strip(api.lastResponse.body) === strip(second!.body),
+    'The same forecast produced two different rankings. Nothing downstream - caching, ' +
+      'sharing a link, comparing two tabs - can be trusted if the ranking is not deterministic.',
+  );
+});
 
 // --- scoring assertions -----------------------------------------------------
 
 Then(
   'on day {int} {string} is rated {string}',
-  function (this: ActivityRankingWorld, dayNumber: number, activityName: string, ratingName: string) {
+  async ({ api }, dayNumber: number, activityName: string, ratingName: string) => {
     const activity = assertActivity(activityName);
     const rating = assertRating(ratingName);
-    const dayRanking = day(this.rankings(), dayNumber);
+    const dayRanking = day(api.rankings(), dayNumber);
     const entry = entryFor(dayRanking, activity);
     expectTrue(
       entry.rating === rating,
@@ -381,10 +329,10 @@ Then(
 
 Then(
   'on day {int} {string} is rated no better than {string}',
-  function (this: ActivityRankingWorld, dayNumber: number, activityName: string, ratingName: string) {
+  async ({ api }, dayNumber: number, activityName: string, ratingName: string) => {
     const activity = assertActivity(activityName);
     const ceiling = assertRating(ratingName);
-    const dayRanking = day(this.rankings(), dayNumber);
+    const dayRanking = day(api.rankings(), dayNumber);
     const entry = entryFor(dayRanking, activity);
     expectTrue(
       RATINGS.indexOf(entry.rating) <= RATINGS.indexOf(ceiling),
@@ -396,17 +344,11 @@ Then(
 
 Then(
   'on day {int} {string} is rated between {string} and {string}',
-  function (
-    this: ActivityRankingWorld,
-    dayNumber: number,
-    activityName: string,
-    lowestName: string,
-    highestName: string,
-  ) {
+  async ({ api }, dayNumber: number, activityName: string, lowestName: string, highestName: string) => {
     const activity = assertActivity(activityName);
     const lowest = assertRating(lowestName);
     const highest = assertRating(highestName);
-    const dayRanking = day(this.rankings(), dayNumber);
+    const dayRanking = day(api.rankings(), dayNumber);
     const entry = entryFor(dayRanking, activity);
     expectTrue(
       isAtLeast(entry.rating, lowest) && RATINGS.indexOf(entry.rating) <= RATINGS.indexOf(highest),
@@ -418,9 +360,9 @@ Then(
 
 Then(
   'on day {int} {string} is ranked {int}',
-  function (this: ActivityRankingWorld, dayNumber: number, activityName: string, rank: number) {
+  async ({ api }, dayNumber: number, activityName: string, rank: number) => {
     const activity = assertActivity(activityName);
-    const dayRanking = day(this.rankings(), dayNumber);
+    const dayRanking = day(api.rankings(), dayNumber);
     const entry = entryFor(dayRanking, activity);
     expectTrue(
       entry.rank === rank,
@@ -432,10 +374,10 @@ Then(
 
 Then(
   'on day {int} {string} is ranked above {string}',
-  function (this: ActivityRankingWorld, dayNumber: number, higherName: string, lowerName: string) {
+  async ({ api }, dayNumber: number, higherName: string, lowerName: string) => {
     const higher = assertActivity(higherName);
     const lower = assertActivity(lowerName);
-    const dayRanking = day(this.rankings(), dayNumber);
+    const dayRanking = day(api.rankings(), dayNumber);
     const a = entryFor(dayRanking, higher);
     const b = entryFor(dayRanking, lower);
     expectTrue(
@@ -448,9 +390,9 @@ Then(
 
 Then(
   'on day {int} no activity is rated {string}',
-  function (this: ActivityRankingWorld, dayNumber: number, ratingName: string) {
+  async ({ api }, dayNumber: number, ratingName: string) => {
     const rating = assertRating(ratingName);
-    const dayRanking = day(this.rankings(), dayNumber);
+    const dayRanking = day(api.rankings(), dayNumber);
     const offenders = dayRanking.activities.filter((a) => a.rating === rating);
     expectTrue(
       offenders.length === 0,
@@ -462,9 +404,9 @@ Then(
 
 Then(
   'on day {int} the reasoning for {string} mentions one of {string}',
-  function (this: ActivityRankingWorld, dayNumber: number, activityName: string, needles: string) {
+  async ({ api }, dayNumber: number, activityName: string, needles: string) => {
     const activity = assertActivity(activityName);
-    const dayRanking = day(this.rankings(), dayNumber);
+    const dayRanking = day(api.rankings(), dayNumber);
     const entry = entryFor(dayRanking, activity);
     expectMentionsAny(
       entry.reasoning,
@@ -476,9 +418,9 @@ Then(
 
 Then(
   '{string} scores higher on day {int} than on day {int}',
-  function (this: ActivityRankingWorld, activityName: string, betterDay: number, worseDay: number) {
+  async ({ api }, activityName: string, betterDay: number, worseDay: number) => {
     const activity = assertActivity(activityName);
-    const rankings = this.rankings();
+    const rankings = api.rankings();
     const better = entryFor(day(rankings, betterDay), activity);
     const worse = entryFor(day(rankings, worseDay), activity);
     expectTrue(
@@ -492,9 +434,9 @@ Then(
 
 Then(
   '{string} scores are in descending order across days {int}, {int}, {int}',
-  function (this: ActivityRankingWorld, activityName: string, a: number, b: number, c: number) {
+  async ({ api }, activityName: string, a: number, b: number, c: number) => {
     const activity = assertActivity(activityName);
-    const rankings = this.rankings();
+    const rankings = api.rankings();
     const scores = [a, b, c].map((n) => entryFor(day(rankings, n), activity).score);
     expectTrue(
       scores[0]! >= scores[1]! && scores[1]! >= scores[2]!,
@@ -506,10 +448,10 @@ Then(
 
 Then(
   '{string} is rated at least {string} on every day',
-  function (this: ActivityRankingWorld, activityName: string, ratingName: string) {
+  async ({ api }, activityName: string, ratingName: string) => {
     const activity = assertActivity(activityName);
     const floor = assertRating(ratingName);
-    for (const dayRanking of this.rankings().days) {
+    for (const dayRanking of api.rankings().days) {
       const entry = entryFor(dayRanking, activity);
       expectTrue(
         isAtLeast(entry.rating, floor),
@@ -522,9 +464,9 @@ Then(
 
 Then(
   'every day has at least one activity rated {string} or better',
-  function (this: ActivityRankingWorld, ratingName: string) {
+  async ({ api }, ratingName: string) => {
     const floor = assertRating(ratingName);
-    for (const dayRanking of this.rankings().days) {
+    for (const dayRanking of api.rankings().days) {
       const usable = dayRanking.activities.filter((a) => isAtLeast(a.rating, floor));
       expectTrue(
         usable.length > 0,
@@ -536,8 +478,8 @@ Then(
 
 // --- ambiguous location -----------------------------------------------------
 
-Then('the error details list the candidate locations', function (this: ActivityRankingWorld) {
-  const body = this.errorBody();
+Then('the error details list the candidate locations', async ({ api }) => {
+  const body = api.errorBody();
   parseWith(
     AmbiguousLocationDetailsSchema,
     body.error.details,
@@ -545,10 +487,10 @@ Then('the error details list the candidate locations', function (this: ActivityR
   );
 });
 
-Then('each candidate carries the location id needed to retry', function (this: ActivityRankingWorld) {
+Then('each candidate carries the location id needed to retry', async ({ api }) => {
   const details = parseWith(
     AmbiguousLocationDetailsSchema,
-    this.errorBody().error.details,
+    api.errorBody().error.details,
     'The details of an AMBIGUOUS_LOCATION error',
   );
   for (const candidate of details.matches) {

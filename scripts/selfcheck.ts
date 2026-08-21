@@ -1,7 +1,7 @@
 /**
  * Proves the test harness itself works, independently of the API under test.
  *
- * The Cucumber suite is red by design until the API exists, which makes it a
+ * The spec suite is red by design until the API exists, which makes it a
  * poor signal for "is my tooling broken?". This script answers that question:
  * it boots the Open-Meteo double, exercises every behaviour the feature files
  * rely on, and checks the contract schemas accept a well-formed payload and
@@ -280,7 +280,7 @@ async function main(): Promise<void> {
     process.exit(1);
   }
   process.stdout.write(
-    'The harness is sound. Any red in the Cucumber suite is the missing API, not the tooling.\n',
+    'The harness is sound. Any red in the spec suite is the missing API, not the tooling.\n',
   );
 }
 

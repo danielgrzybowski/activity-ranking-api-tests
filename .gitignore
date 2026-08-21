@@ -3,3 +3,5 @@ reports/
 .env
 *.log
 .DS_Store
+.features-gen/
+test-results/
