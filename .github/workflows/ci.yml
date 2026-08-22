@@ -1,4 +1,4 @@
-name: CI
+name: run tests
 
 on:
   push:
@@ -21,19 +21,15 @@ jobs:
       - name: Typecheck
         run: npm run typecheck
 
-      # The harness must be green even though the suite is not: it tells
-      # "the tooling is broken" apart from "the API does not exist yet".
       - name: Harness self-check
         run: npm run selfcheck
 
-      # bddgen fails on an undefined step or a step whose argument count does
-      # not match its Gherkin, which is a defect in the suite rather than the
-      # intended red state. No browsers are downloaded: this is an API suite.
       - name: Validate every step is wired
         run: npm run validate
 
-      # Expected red until the API exists. Non-blocking on purpose - flip
-      # continue-on-error off in the same commit that lands the implementation.
+      - name: Specification is satisfiable
+        run: npm run demo:green
+
       - name: Specification suite
         continue-on-error: true
         run: npm test

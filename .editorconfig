@@ -1,0 +1,16 @@
+# Deliberately not Prettier: the suite hand-wraps a few dense literals (the
+# reasoning vocabulary, the schema fixtures in selfcheck) that a formatter
+# would explode to one item per line and make harder to read. These are the
+# rules that matter and that a formatter would not have fought over anyway.
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+indent_style = space
+indent_size = 2
+
+[*.md]
+trim_trailing_whitespace = false

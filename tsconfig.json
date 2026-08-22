@@ -14,5 +14,5 @@
     "skipLibCheck": true,
     "resolveJsonModule": true
   },
-  "include": ["features/**/*.ts", "src/**/*.ts", "scripts/**/*.ts"]
+  "include": ["features/**/*.ts", "src/**/*.ts", "scripts/**/*.ts", "reference-impl/**/*.ts"]
 }

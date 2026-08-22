@@ -23,7 +23,7 @@ export default defineConfig({
    * separately-deployed service against a stubbed upstream, not of Playwright:
    * the same constraint applied under Cucumber.
    *
-   * Runtime is ~4s for 104 scenarios, so there is nothing to buy here anyway.
+   * The whole suite runs in a few seconds anyway, so there is nothing to buy.
    */
   workers: 1,
   fullyParallel: false,

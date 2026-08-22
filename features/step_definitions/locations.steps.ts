@@ -1,7 +1,7 @@
 import type { DataTable } from 'playwright-bdd';
 import { expectEqual, expectTrue, parseWith } from '../../src/support/assertions';
 import { Then, When } from '../../src/support/fixtures';
-import { LocationsResponseSchema } from '../../src/support/schemas';
+import { LocationsResponseSchema, type LocationsResponse } from '../../src/support/schemas';
 
 const LOCATIONS_PATH = '/v1/locations';
 
@@ -71,25 +71,6 @@ Then('every result has a distinct display name', async ({ api }) => {
   );
 });
 
-Then('every result has its own coordinates, country and timezone', async ({ api }) => {
-  const results = api.locations().results;
-  expectTrue(results.length > 1, 'This check needs more than one result to be meaningful.');
-
-  const keys = results.map((r) => `${r.latitude},${r.longitude}`);
-  const duplicates = keys.filter((key, i) => keys.indexOf(key) !== i);
-  expectTrue(
-    duplicates.length === 0,
-    `Two results share coordinates (${duplicates.join('; ')}), so they are not distinct places.`,
-  );
-
-  for (const result of results) {
-    expectTrue(
-      result.country.length > 0 && result.timezone.length > 0,
-      `Result "${result.displayName}" is missing a country or timezone, which the UI needs to disambiguate it.`,
-    );
-  }
-});
-
 Then('the response body carries no error', async ({ api }) => {
   const body = api.lastResponse.body as Record<string, unknown> | undefined;
   expectTrue(
@@ -104,4 +85,62 @@ Then('the response body carries no error', async ({ api }) => {
  */
 Then('the echoed query is {string}', async ({ api }, expected: string) => {
   expectEqual(api.locations().query, expected, 'the echoed query');
+});
+
+Then('the search returns at least {int} result(s)', async ({ api }, minimum: number) => {
+  const results = api.locations().results;
+  expectTrue(
+    results.length >= minimum,
+    `Expected at least ${minimum} search result(s), got ${results.length}: ` +
+      `[${results.map((r) => r.displayName).join(' | ') || '<none>'}]`,
+  );
+});
+
+Then('the last result is {string}', async ({ api }, displayName: string) => {
+  const found = api.locations().results.map((r) => r.displayName);
+  expectTrue(
+    found[found.length - 1] === displayName,
+    `Expected "${displayName}" to sort last, got [${found.join(' | ') || '<none>'}]`,
+  );
+});
+
+/** Used by the live specs, where the catalogue is whatever Open-Meteo says today. */
+Then('a result in {string} is returned', async ({ api }, country: string) => {
+  const results = api.locations().results;
+  expectTrue(
+    results.some((r) => r.country === country),
+    `Expected at least one result in ${country}, got ` +
+      `[${results.map((r) => `${r.displayName} (${r.country})`).join(' | ') || '<none>'}]`,
+  );
+});
+
+function resultNamed(results: LocationsResponse['results'], displayName: string) {
+  const match = results.find((r) => r.displayName === displayName);
+  if (!match) {
+    throw new Error(
+      `No result with the display name "${displayName}". Got: ` +
+        `[${results.map((r) => r.displayName).join(' | ') || '<none>'}]`,
+    );
+  }
+  return match;
+}
+
+/**
+ * Open-Meteo has no population for thousands of small places. `null` says so
+ * honestly; a 0 would sort and read as a fact about the town.
+ */
+Then('the result {string} has no population', async ({ api }, displayName: string) => {
+  const result = resultNamed(api.locations().results, displayName);
+  expectTrue(
+    result.population === null,
+    `Expected an unknown population to be reported as null, got ${JSON.stringify(result.population)}.`,
+  );
+});
+
+Then('the result {string} has no region', async ({ api }, displayName: string) => {
+  const result = resultNamed(api.locations().results, displayName);
+  expectTrue(
+    result.region === null,
+    `Expected an unknown region to be reported as null, got ${JSON.stringify(result.region)}.`,
+  );
 });

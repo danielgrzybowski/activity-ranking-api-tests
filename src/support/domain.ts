@@ -45,8 +45,14 @@ export function isAtLeast(actual: Rating, minimum: Rating): boolean {
  * Indoor Sightseeing is always an option a user can act on, so the contract
  * gives it a floor. This is a UX decision as much as a scoring one: a
  * front end must never show a day with four dead-end suggestions.
+ *
+ * The number is the bottom of the FAIR band and nothing else, so that the
+ * feature files can state the rule in the language a user reads ("rated at
+ * least FAIR") and mean exactly what this constant enforces. A floor that sat
+ * between two band boundaries would make the Gherkin and the invariant
+ * disagree about scores in the gap.
  */
-export const INDOOR_SIGHTSEEING_MINIMUM_SCORE = 45;
+export const INDOOR_SIGHTSEEING_MINIMUM_SCORE = RATING_BANDS.find((b) => b.rating === 'FAIR')!.min;
 
 /** Ties are broken alphabetically by activity name so ranks are reproducible. */
 export function expectedRankOrder(
@@ -74,6 +80,65 @@ export type ErrorCode = (typeof ERROR_CODES)[number];
 
 /** Reasoning is rendered in a card in the UI, so it has a length budget. */
 export const REASONING_MAX_LENGTH = 160;
+
+/**
+ * Two of the four activities need something of the place and not just of the
+ * sky: surfing needs a coast, skiing needs a ski area. The contract answers
+ * that with the `feasible` flag on every entry, so the suite reads it rather
+ * than guessing at it.
+ *
+ * Where `feasible` is false the reasoning still has to say *why*: a user
+ * reading "Surfing: UNSUITABLE - 8 km/h of wind" for an alpine valley
+ * concludes the sea was merely flat that week. This vocabulary is what that
+ * check looks for, in place of an exact sentence, so the copy stays free.
+ *
+ * It is only ever applied to entries the API has already flagged infeasible.
+ * Run over every reasoning it would misread "Sea breeze, 19°C" as a
+ * declaration that there is no sea - which is exactly why feasibility is a
+ * field and not an inference.
+ */
+export const INFEASIBILITY_MARKERS = ['coast', 'sea', 'ski area', 'inland'];
+
+/**
+ * Whole words only, or "a good season for it" reads as a statement about the
+ * sea. "coastal" and "coastline" are the same word for this purpose.
+ */
+const INFEASIBILITY_PATTERN = /\b(coast(al|line)?|sea|ski area|inland)\b/i;
+
+export function explainsInfeasibility(reasoning: string): boolean {
+  return INFEASIBILITY_PATTERN.test(reasoning);
+}
+
+/**
+ * Vocabulary a reasoning has to draw on to explain anything. "Suitable" on its
+ * own tells the user a verdict with no reason behind it, and a verdict they
+ * cannot interrogate is one they cannot plan around.
+ */
+export const WEATHER_VOCABULARY = [
+  'snow', 'rain', 'shower', 'precipitation', 'wind', 'gust', 'breeze', 'calm',
+  'flat', 'swell', 'sun', 'clear', 'cloud', 'overcast', 'fog', 'storm',
+  'thunder', 'temperature', '°c', 'degrees', 'warm', 'hot', 'heat', 'mild',
+  'cold', 'freezing', 'dry', 'wet', 'humid',
+];
+
+/**
+ * A figure with a unit attached. A bare digit is not evidence of an
+ * explanation - "Rated 3 of 5" quotes a number and says nothing about the
+ * weather - so the number has to carry a unit the user can read.
+ */
+const MEASUREMENT_PATTERN = /\d+(?:\.\d+)?\s*(?:°\s*c|mm|cm|km\/h|kph|m\/s|%|h\b|hours?)/i;
+
+/**
+ * A reasoning carries one of exactly two kinds of reason: the weather driver
+ * behind the verdict, or the fact that the place cannot support the activity
+ * at all. Which of the two is required is decided by `feasible` and never by
+ * reading the prose, for the reason given above INFEASIBILITY_MARKERS.
+ */
+export function explainsVerdict(reasoning: string, feasible: boolean): boolean {
+  if (!feasible) return explainsInfeasibility(reasoning);
+  const text = reasoning.toLowerCase();
+  return WEATHER_VOCABULARY.some((word) => text.includes(word)) || MEASUREMENT_PATTERN.test(text);
+}
 
 /** Latency budgets, expressed from the front-end experience backwards. */
 export const LATENCY_BUDGET_MS = {

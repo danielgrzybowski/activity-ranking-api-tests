@@ -13,7 +13,8 @@ export const LocationSchema = z
     name: z.string().min(1),
     country: z.string().min(1),
     countryCode: z.string().length(2),
-    region: z.string(),
+    /** Null where Open-Meteo has no region for the place; the API must not invent one. */
+    region: z.string().min(1).nullable(),
     latitude: z.number().gte(-90).lte(90),
     longitude: z.number().gte(-180).lte(180),
     timezone: z.string().min(1),
@@ -37,6 +38,16 @@ export const LocationsResponseSchema = z
 export const ActivityRankingSchema = z
   .object({
     activity: z.enum(ACTIVITIES),
+    /**
+     * Whether the place can support this activity at all, answered before the
+     * weather is read: surfing needs a coast, skiing needs a ski area.
+     *
+     * A field rather than something a reader infers from the prose. "Sea
+     * breeze, 19°C and clear skies" is a good day at the beach, not a
+     * statement that there is no sea, and a contract that made the front end
+     * grep the reasoning to tell those apart would be unimplementable.
+     */
+    feasible: z.boolean(),
     score: z.number().int().min(0).max(100),
     rating: z.enum(RATINGS),
     rank: z.number().int().min(1).max(ACTIVITIES.length),
@@ -54,7 +65,7 @@ export const DayRankingSchema = z
 export const RankingsResponseSchema = z
   .object({
     location: LocationSchema,
-    generatedAt: z.string().datetime(),
+    generatedAt: z.string().datetime({ offset: true }),
     forecast: z
       .object({
         source: z.literal('open-meteo'),

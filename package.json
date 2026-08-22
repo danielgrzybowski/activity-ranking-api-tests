@@ -10,10 +10,10 @@
   "scripts": {
     "test": "bddgen && playwright test --project=spec",
     "test:smoke": "bddgen && playwright test --project=spec --grep @smoke",
-    "test:contract": "bddgen && playwright test --project=spec --grep @contract",
-    "test:scoring": "bddgen && playwright test --project=spec --grep @scoring",
-    "test:resilience": "bddgen && playwright test --project=spec --grep @resilience",
     "test:live": "bddgen && playwright test --project=live",
+    "demo:green": "tsx scripts/demo-green.ts",
+    "demo:live": "tsx scripts/demo-green.ts --live",
+    "mutation-run": "tsx scripts/mutation-run.ts",
     "test:report": "playwright show-report reports/playwright",
     "validate": "bddgen",
     "selfcheck": "tsx scripts/selfcheck.ts",

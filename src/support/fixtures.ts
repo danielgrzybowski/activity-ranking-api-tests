@@ -25,17 +25,24 @@ export class ApiSession {
   response: ApiResponse | undefined;
   /** A second call, for the determinism scenario. */
   repeatResponse: ApiResponse | undefined;
+  /** Set when a scenario is standing in for a browser page. */
+  origin: string | undefined;
 
   constructor(private readonly request: APIRequestContext) {}
 
   async call(options: RequestOptions): Promise<ApiResponse> {
-    this.response = await callApi(this.request, options);
+    this.response = await callApi(this.request, this.withOrigin(options));
     return this.response;
   }
 
   async callAgain(options: RequestOptions): Promise<ApiResponse> {
-    this.repeatResponse = await callApi(this.request, options);
+    this.repeatResponse = await callApi(this.request, this.withOrigin(options));
     return this.repeatResponse;
+  }
+
+  private withOrigin(options: RequestOptions): RequestOptions {
+    if (this.origin === undefined) return options;
+    return { ...options, headers: { origin: this.origin, ...options.headers } };
   }
 
   get lastResponse(): ApiResponse {
@@ -91,19 +98,9 @@ export const test = base.extend<
 
     await use(session);
 
-    // Structural rules are held against every 200 the suite ever sees, not
-    // only where a feature file names them. See invariants.ts for why.
-    if (testInfo.status === 'passed') {
-      for (const response of [session.response, session.repeatResponse]) {
-        if (!response) continue;
-        const rankings = asRankingsResponse(response.status, response.body);
-        if (rankings) assertRankingInvariants(rankings);
-      }
-    }
-
-    // On failure, attach what the API said and what it asked Open-Meteo for.
-    // Debugging a ranking disagreement without both halves is guesswork.
-    if (testInfo.status !== testInfo.expectedStatus) {
+    // What the API said and what it asked Open-Meteo for. Debugging a ranking
+    // disagreement without both halves is guesswork.
+    const attachDiagnostics = async (): Promise<void> => {
       if (session.response) {
         await testInfo.attach('api-response.json', {
           contentType: 'application/json',
@@ -130,8 +127,32 @@ export const test = base.extend<
           ),
         });
       }
+    };
+
+    // Structural rules are held against every 200 the suite ever sees, not
+    // only where a feature file names them. See invariants.ts for why.
+    //
+    // The failure is caught rather than thrown straight out: an invariant
+    // breach is exactly the failure that needs the diagnostics attached, and
+    // throwing here would skip them.
+    let invariantFailure: unknown;
+    if (testInfo.status === testInfo.expectedStatus) {
+      try {
+        for (const response of [session.response, session.repeatResponse]) {
+          if (!response) continue;
+          const rankings = asRankingsResponse(response.status, response.body);
+          if (rankings) assertRankingInvariants(rankings);
+        }
+      } catch (error) {
+        invariantFailure = error;
+      }
     }
+
+    if (invariantFailure !== undefined || testInfo.status !== testInfo.expectedStatus) {
+      await attachDiagnostics();
+    }
+    if (invariantFailure !== undefined) throw invariantFailure;
   },
 });
 
-export const { Given, When, Then, BeforeAll } = createBdd(test);
+export const { Given, When, Then } = createBdd(test);

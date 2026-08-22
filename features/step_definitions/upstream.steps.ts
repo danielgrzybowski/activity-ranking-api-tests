@@ -13,25 +13,39 @@ interface PlaceRow {
   id: string;
   name: string;
   region: string;
+  /** Optional column: the county or district below `region`. */
+  subregion?: string;
   country: string;
   countryCode: string;
   latitude: string;
   longitude: string;
   timezone: string;
   population: string;
+  /** Optional column; blank or absent means a populated place. */
+  featureCode?: string;
 }
 
+/**
+ * An empty cell means Open-Meteo has no value for that field, which is a real
+ * and common state rather than a hole in the fixture. The double then omits
+ * the key entirely, as the live service does.
+ */
 function toPlace(row: PlaceRow): GeoPlace {
+  const region = row.region.trim();
+  const subregion = row.subregion?.trim() ?? '';
+  const population = row.population.trim();
   return {
     id: Number.parseInt(row.id, 10),
     name: row.name,
-    admin1: row.region,
+    ...(region === '' ? {} : { admin1: region }),
+    ...(subregion === '' ? {} : { admin2: subregion }),
     country: row.country,
     country_code: row.countryCode,
     latitude: Number.parseFloat(row.latitude),
     longitude: Number.parseFloat(row.longitude),
     timezone: row.timezone,
-    population: Number.parseInt(row.population, 10),
+    population: population === '' ? null : Number.parseInt(population, 10),
+    ...(row.featureCode?.trim() ? { feature_code: row.featureCode.trim() } : {}),
   };
 }
 
@@ -44,14 +58,14 @@ Given("Open-Meteo's place catalogue contains the standard test cities", async ({
 });
 
 Given(
-  'every day of the forecast for {string} is a {string}',
+  'every day of the forecast for {string} is {string}',
   async ({ upstream }, label: string, profileKey: string) => {
     upstream.setUniformForecast(upstream.findPlaceByLabel(label).id, profileKey);
   },
 );
 
 Given(
-  'day {int} of the forecast for {string} is a {string}',
+  'day {int} of the forecast for {string} is {string}',
   async ({ upstream }, dayNumber: number, label: string, profileKey: string) => {
     upstream.setForecastDay(upstream.findPlaceByLabel(label).id, dayNumber, profileKey);
   },
@@ -99,13 +113,6 @@ Then("Open-Meteo's forecast service was not called", async ({ upstream }) => {
   );
 });
 
-Then("Open-Meteo's geocoding service was called", async ({ upstream }) => {
-  expectTrue(
-    upstream.requestsFor('geocoding').length > 0,
-    'Expected the API to call Open-Meteo geocoding, but it made no such call.',
-  );
-});
-
 Then("Open-Meteo's forecast service was called once", async ({ upstream }) => {
   const calls = upstream.requestsFor('forecast');
   expectTrue(
@@ -145,16 +152,59 @@ Then('the forecast request asked for {int} days', async ({ upstream }, days: num
   );
 });
 
-Then('the forecast request asked for the daily variables:', async ({ upstream }, table: DataTable) => {
+/**
+ * Both directions, because the scenario claims the request is *exactly* what
+ * the ranking needs. A missing variable is a rule scored on data that never
+ * arrived; an extra one is quota spent on a column no rule reads, and it
+ * drifts further every time the model is tuned. A subset check would have
+ * caught only the first.
+ */
+Then(
+  'the forecast request asked for exactly these daily variables:',
+  async ({ upstream }, table: DataTable) => {
+    const call = upstream.requestsFor('forecast')[0];
+    expectTrue(call !== undefined, 'Expected a forecast call to have been made, but there was none.');
+
+    const requested = (call!.query['daily'] ?? '')
+      .split(',')
+      .map((v) => v.trim())
+      .filter((v) => v !== '');
+    const expected = table.raw().map((row) => row[0]!);
+
+    const missing = expected.filter((v) => !requested.includes(v));
+    const unexpected = requested.filter((v) => !expected.includes(v));
+    const duplicated = requested.filter((v, i) => requested.indexOf(v) !== i);
+
+    const complaints = [
+      missing.length > 0 ? `is missing ${missing.join(', ')} - a rule would be scored on data that never arrived` : '',
+      unexpected.length > 0 ? `also asks for ${unexpected.join(', ')} - quota spent on a column no rule reads` : '',
+      duplicated.length > 0 ? `repeats ${[...new Set(duplicated)].join(', ')}` : '',
+    ].filter(Boolean);
+
+    expectTrue(
+      complaints.length === 0,
+      `The forecast request ${complaints.join('; and ')}. ` +
+        `It asked for: ${requested.join(', ') || '<none>'}`,
+    );
+  },
+);
+
+/**
+ * Without a timezone on the request, Open-Meteo answers in GMT and the window
+ * starts at GMT midnight - so a user in Auckland gets yesterday on the first
+ * card whenever it is already tomorrow there. The bug is invisible from the
+ * response alone (seven consecutive dates, all present), which is why it is
+ * asserted on the request.
+ */
+Then("the forecast request asked for dates in the location's timezone", async ({ upstream }) => {
   const call = upstream.requestsFor('forecast')[0];
   expectTrue(call !== undefined, 'Expected a forecast call to have been made, but there was none.');
 
-  const requested = (call!.query['daily'] ?? '').split(',').map((v) => v.trim());
-  const missing = table.raw().map((row) => row[0]!).filter((v) => !requested.includes(v));
-
+  const timezone = call!.query['timezone'];
   expectTrue(
-    missing.length === 0,
-    `The forecast request is missing daily variables the ranking needs: ${missing.join(', ')}. ` +
-      `It asked for: ${requested.join(', ') || '<none>'}`,
+    timezone === 'auto' || (timezone !== undefined && timezone.includes('/')),
+    `Expected the forecast request to carry a timezone - "auto", or the location's own - got ` +
+      `${timezone === undefined ? 'none' : `"${timezone}"`}. Without it Open-Meteo answers in GMT, ` +
+      `and day 1 is GMT's today rather than the traveller's.`,
   );
 });

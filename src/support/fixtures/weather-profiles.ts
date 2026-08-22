@@ -9,16 +9,25 @@
  *
  * Fixtures are inputs only. Expected outcomes live in the feature files,
  * because the expectations are the specification.
+ *
+ * Where a scenario claims a single driver decides the verdict, the profiles it
+ * compares differ in that driver alone. ALPINE_POWDER_DAY / LIGHT_SNOW_DAY /
+ * COLD_DRY_DAY vary the snowfall at a near-constant temperature and wind, and
+ * COLD_CLEAN_SWELL_DAY holds the surfing wind at its ideal while dropping the
+ * air below freezing. A scenario whose fixtures move two variables at once
+ * cannot tell which one the implementation actually read.
  */
 
+/**
+ * Exactly the daily variables the ranking model reads - no more. A fixture
+ * field nothing consumes reads as meaningful and is not, and it drifts out of
+ * step with what the API actually asks Open-Meteo for.
+ */
 export interface DailyWeather {
   /** WMO weather interpretation code. */
   weather_code: number;
   temperature_2m_max: number;
-  temperature_2m_min: number;
-  apparent_temperature_max: number;
   precipitation_sum: number;
-  precipitation_probability_max: number;
   snowfall_sum: number;
   wind_speed_10m_max: number;
   wind_gusts_10m_max: number;
@@ -27,7 +36,11 @@ export interface DailyWeather {
 
 export interface WeatherProfile {
   key: string;
-  /** Plain-English summary, echoed in failure messages to aid triage. */
+  /**
+   * Plain-English summary of the numbers below, so a reader can check the
+   * fixture really does justify the verdict the Gherkin asks for. Echoed when
+   * a step names a profile that does not exist.
+   */
   description: string;
   daily: DailyWeather;
 }
@@ -37,14 +50,11 @@ const hours = (h: number): number => Math.round(h * 3600);
 const PROFILE_LIST: WeatherProfile[] = [
   {
     key: 'ALPINE_POWDER_DAY',
-    description: '25cm of fresh snow, -4C, light winds',
+    description: '25cm of fresh snow at -4C, light winds',
     daily: {
       weather_code: 75,
       temperature_2m_max: -4,
-      temperature_2m_min: -11,
-      apparent_temperature_max: -9,
       precipitation_sum: 18.2,
-      precipitation_probability_max: 95,
       snowfall_sum: 25,
       wind_speed_10m_max: 11,
       wind_gusts_10m_max: 22,
@@ -57,10 +67,7 @@ const PROFILE_LIST: WeatherProfile[] = [
     daily: {
       weather_code: 75,
       temperature_2m_max: -12,
-      temperature_2m_min: -19,
-      apparent_temperature_max: -24,
       precipitation_sum: 29.0,
-      precipitation_probability_max: 100,
       snowfall_sum: 40,
       wind_speed_10m_max: 64,
       wind_gusts_10m_max: 95,
@@ -73,10 +80,7 @@ const PROFILE_LIST: WeatherProfile[] = [
     daily: {
       weather_code: 61,
       temperature_2m_max: 9,
-      temperature_2m_min: 3,
-      apparent_temperature_max: 7,
       precipitation_sum: 6.4,
-      precipitation_probability_max: 80,
       snowfall_sum: 0,
       wind_speed_10m_max: 18,
       wind_gusts_10m_max: 31,
@@ -89,10 +93,7 @@ const PROFILE_LIST: WeatherProfile[] = [
     daily: {
       weather_code: 2,
       temperature_2m_max: 21,
-      temperature_2m_min: 15,
-      apparent_temperature_max: 21,
       precipitation_sum: 0.4,
-      precipitation_probability_max: 15,
       snowfall_sum: 0,
       wind_speed_10m_max: 24,
       wind_gusts_10m_max: 33,
@@ -105,10 +106,7 @@ const PROFILE_LIST: WeatherProfile[] = [
     daily: {
       weather_code: 0,
       temperature_2m_max: 26,
-      temperature_2m_min: 17,
-      apparent_temperature_max: 26,
       precipitation_sum: 0,
-      precipitation_probability_max: 0,
       snowfall_sum: 0,
       wind_speed_10m_max: 3,
       wind_gusts_10m_max: 7,
@@ -121,10 +119,7 @@ const PROFILE_LIST: WeatherProfile[] = [
     daily: {
       weather_code: 95,
       temperature_2m_max: 14,
-      temperature_2m_min: 11,
-      apparent_temperature_max: 11,
       precipitation_sum: 30.5,
-      precipitation_probability_max: 100,
       snowfall_sum: 0,
       wind_speed_10m_max: 66,
       wind_gusts_10m_max: 95,
@@ -137,10 +132,7 @@ const PROFILE_LIST: WeatherProfile[] = [
     daily: {
       weather_code: 0,
       temperature_2m_max: 22,
-      temperature_2m_min: 14,
-      apparent_temperature_max: 22,
       precipitation_sum: 0,
-      precipitation_probability_max: 3,
       snowfall_sum: 0,
       wind_speed_10m_max: 8,
       wind_gusts_10m_max: 15,
@@ -153,10 +145,7 @@ const PROFILE_LIST: WeatherProfile[] = [
     daily: {
       weather_code: 63,
       temperature_2m_max: 4,
-      temperature_2m_min: 1,
-      apparent_temperature_max: 0,
       precipitation_sum: 18.0,
-      precipitation_probability_max: 95,
       snowfall_sum: 0,
       wind_speed_10m_max: 29,
       wind_gusts_10m_max: 46,
@@ -169,10 +158,7 @@ const PROFILE_LIST: WeatherProfile[] = [
     daily: {
       weather_code: 3,
       temperature_2m_max: 16,
-      temperature_2m_min: 10,
-      apparent_temperature_max: 15,
       precipitation_sum: 1.2,
-      precipitation_probability_max: 40,
       snowfall_sum: 0,
       wind_speed_10m_max: 14,
       wind_gusts_10m_max: 25,
@@ -181,18 +167,54 @@ const PROFILE_LIST: WeatherProfile[] = [
   },
   {
     key: 'HEATWAVE_DAY',
-    description: '39C with no respite overnight - too hot to walk a city all day',
+    description: '39C and cloudless - too hot to walk a city all day',
     daily: {
       weather_code: 0,
       temperature_2m_max: 39,
-      temperature_2m_min: 27,
-      apparent_temperature_max: 43,
       precipitation_sum: 0,
-      precipitation_probability_max: 0,
       snowfall_sum: 0,
       wind_speed_10m_max: 6,
       wind_gusts_10m_max: 12,
       sunshine_duration: hours(13),
+    },
+  },
+  {
+    key: 'COLD_CLEAN_SWELL_DAY',
+    description: '-2C with an ideal 24 km/h wind - the wind is right, the air is not',
+    daily: {
+      weather_code: 1,
+      temperature_2m_max: -2,
+      precipitation_sum: 0.2,
+      snowfall_sum: 0,
+      wind_speed_10m_max: 24,
+      wind_gusts_10m_max: 33,
+      sunshine_duration: hours(6),
+    },
+  },
+  {
+    key: 'LIGHT_SNOW_DAY',
+    description: '6cm of new snow, -3C, light winds - the middle of the snowfall range',
+    daily: {
+      weather_code: 73,
+      temperature_2m_max: -3,
+      precipitation_sum: 5.0,
+      snowfall_sum: 6,
+      wind_speed_10m_max: 12,
+      wind_gusts_10m_max: 24,
+      sunshine_duration: hours(3),
+    },
+  },
+  {
+    key: 'COLD_DRY_DAY',
+    description: 'No new snow, -3C, light winds - identical to LIGHT_SNOW_DAY but for the snowfall',
+    daily: {
+      weather_code: 1,
+      temperature_2m_max: -3,
+      precipitation_sum: 0,
+      snowfall_sum: 0,
+      wind_speed_10m_max: 10,
+      wind_gusts_10m_max: 20,
+      sunshine_duration: hours(6),
     },
   },
 ];
@@ -207,8 +229,10 @@ export const DEFAULT_PROFILE_KEY = 'MILD_OVERCAST_DAY';
 export function getProfile(key: string): WeatherProfile {
   const profile = WEATHER_PROFILES.get(key);
   if (!profile) {
-    const known = [...WEATHER_PROFILES.keys()].join(', ');
-    throw new Error(`Unknown weather profile "${key}". Known profiles: ${known}`);
+    const known = [...WEATHER_PROFILES.values()]
+      .map((p) => `\n  ${p.key} - ${p.description}`)
+      .join('');
+    throw new Error(`Unknown weather profile "${key}". Known profiles:${known}`);
   }
   return profile;
 }

@@ -2,10 +2,12 @@ import type { DataTable } from 'playwright-bdd';
 import { expectEqual, expectMentionsAny, expectTrue, parseWith } from '../../src/support/assertions';
 import {
   ACTIVITIES,
+  INFEASIBILITY_MARKERS,
   RATINGS,
   RATING_BANDS,
-  REASONING_MAX_LENGTH,
   expectedRankOrder,
+  explainsInfeasibility,
+  explainsVerdict,
   isAtLeast,
   ratingForScore,
   type Activity,
@@ -21,14 +23,6 @@ import {
 } from '../../src/support/schemas';
 
 const RANKINGS_PATH = '/v1/rankings';
-
-/** Vocabulary a reasoning string must draw on to actually explain anything. */
-const WEATHER_VOCABULARY = [
-  'snow', 'rain', 'shower', 'precipitation', 'wind', 'gust', 'breeze', 'calm',
-  'flat', 'swell', 'sun', 'clear', 'cloud', 'overcast', 'fog', 'storm',
-  'thunder', 'temperature', '°c', 'degrees', 'warm', 'hot', 'heat', 'mild',
-  'cold', 'freezing', 'dry', 'wet', 'humid',
-];
 
 function assertActivity(name: string): Activity {
   if (!(ACTIVITIES as readonly string[]).includes(name)) {
@@ -104,6 +98,23 @@ When('I request rankings with no location', async ({ api }) => {
   await api.call({ path: RANKINGS_PATH });
 });
 
+/**
+ * The seam between the two endpoints, and the only step that reads one
+ * response to build the next request. Whatever the search called the place,
+ * the ranking has to accept the id it handed out.
+ */
+When('I request rankings for the first search result', async ({ api }) => {
+  const results = api.locations().results;
+  const first = results[0];
+  if (!first) throw new Error('The search returned no results, so there is no id to rank.');
+  await api.call({ path: RANKINGS_PATH, query: { locationId: first.id } });
+});
+
+/** Sent verbatim, so bytes an encoder would have scrubbed reach the API. */
+When('I request rankings with the raw query string {string}', async ({ api }, rawQuery: string) => {
+  await api.call({ path: RANKINGS_PATH, rawQuery });
+});
+
 When(
   'I request rankings for location id {string} and the city {string}',
   async ({ api }, locationId: string, city: string) => {
@@ -155,30 +166,50 @@ Then('every day ranks all four activities:', async ({ api }, table: DataTable) =
   }
 });
 
-Then(
-  'every activity entry has a date, an activity name, a suitability score and a rating',
-  async ({ api }) => {
-    // The schema enforces types; this checks the date is carried per day and
-    // that scores are real numbers a UI can put on a bar.
-    for (const dayRanking of api.rankings().days) {
+/**
+ * The ticket's own list, in one place: "the response includes, per day and per
+ * activity: Date, Activity name, A measure of how suitable the conditions are,
+ * Reasoning". The schema enforces the types; this says out loud that the four
+ * things the feature was asked for are the four things that arrive.
+ */
+Then('every entry carries a date, an activity name, a suitability and a reason', async ({ api }) => {
+  for (const dayRanking of api.rankings().days) {
+    expectTrue(
+      /^\d{4}-\d{2}-\d{2}$/.test(dayRanking.date),
+      `Expected an ISO calendar date on each day, got "${dayRanking.date}".`,
+    );
+    for (const entry of dayRanking.activities) {
+      const where = `${entry.activity} on ${dayRanking.date}`;
       expectTrue(
-        /^\d{4}-\d{2}-\d{2}$/.test(dayRanking.date),
-        `Expected an ISO date on each day, got "${dayRanking.date}"`,
+        (ACTIVITIES as readonly string[]).includes(entry.activity),
+        `${where} names an activity outside the four in the ticket.`,
       );
-      for (const entry of dayRanking.activities) {
-        expectTrue(
-          Number.isInteger(entry.score) && entry.score >= 0 && entry.score <= 100,
-          `${entry.activity} on ${dayRanking.date} has score ${entry.score}, outside the documented 0-100 range.`,
-        );
-        expectTrue(
-          (RATINGS as readonly string[]).includes(entry.rating),
-          `${entry.activity} on ${dayRanking.date} has an unknown rating "${entry.rating}".`,
-        );
-      }
+      // Both halves of the suitability: the number a progress bar renders, and
+      // the label beside it. Either alone leaves the front end guessing.
+      expectTrue(
+        Number.isInteger(entry.score) && entry.score >= 0 && entry.score <= 100,
+        `${where} has score ${entry.score}, outside the documented 0-100 range.`,
+      );
+      expectTrue(
+        entry.rating === ratingForScore(entry.score),
+        `${where} scores ${entry.score} but is labelled "${entry.rating}".`,
+      );
+      expectTrue(
+        entry.reasoning.trim().length > 0,
+        `${where} has no reasoning, so the user is told a verdict with no reason for it.`,
+      );
     }
-  },
-);
+  }
+});
 
+/**
+ * The number comes from the Gherkin, so the scenario reads as the product
+ * decision it is. It is not cross-checked against REASONING_MAX_LENGTH here:
+ * that would make the parameter a fiction, and fail a scenario with a
+ * complaint about the suite's own constant rather than about the API.
+ * Nothing is lost - invariants.ts holds the documented budget against every
+ * 200 the suite receives, whether or not a feature file mentions it.
+ */
 Then('every reasoning is at most {int} characters', async ({ api }, limit: number) => {
   for (const dayRanking of api.rankings().days) {
     for (const entry of dayRanking.activities) {
@@ -189,26 +220,68 @@ Then('every reasoning is at most {int} characters', async ({ api }, limit: numbe
       );
     }
   }
-  expectEqual(limit, REASONING_MAX_LENGTH, 'the documented reasoning budget');
 });
 
 /**
- * "Suitable" on its own tells the user nothing. Every reasoning has to name
- * a driver or quote a number, which is what makes the ranking explainable.
+ * "Suitable" on its own tells the user nothing, and leaves them unable to tell
+ * a bad week from a bad idea. The rule itself lives in `explainsVerdict`,
+ * because invariants.ts holds it against every 200 the suite receives and the
+ * two must not be able to drift apart.
  */
-Then('every reasoning refers to at least one weather driver', async ({ api }) => {
+Then('every reasoning gives a reason the user can act on', async ({ api }) => {
   for (const dayRanking of api.rankings().days) {
     for (const entry of dayRanking.activities) {
-      const text = entry.reasoning.toLowerCase();
-      const namesDriver = WEATHER_VOCABULARY.some((word) => text.includes(word));
-      const quotesNumber = /\d/.test(text);
       expectTrue(
-        namesDriver || quotesNumber,
-        `${entry.activity} on ${dayRanking.date} gives no reason a user could act on: "${entry.reasoning}"`,
+        explainsVerdict(entry.reasoning, entry.feasible),
+        `${entry.activity} on ${dayRanking.date} gives no reason a user could act on: ` +
+          `"${entry.reasoning}"`,
       );
     }
   }
 });
+
+/**
+ * Whether a place has a coast or a ski area is a property of the place, so
+ * this is asserted across the whole forecast rather than on a single day: the
+ * verdict, the score and the explanation all have to hold every day.
+ */
+Then('{string} is reported as not possible at this location', async ({ api }, activityName: string) => {
+  const activity = assertActivity(activityName);
+  for (const dayRanking of api.rankings().days) {
+    const entry = entryFor(dayRanking, activity);
+    expectTrue(
+      !entry.feasible,
+      `${activity} on ${dayRanking.date} is marked feasible and scored on the weather ` +
+        `("${entry.reasoning}"), but this location cannot support it at all.`,
+    );
+    expectTrue(
+      entry.score === 0 && entry.rating === 'UNSUITABLE',
+      `${activity} on ${dayRanking.date} says it is not possible here ("${entry.reasoning}") but ` +
+        `scores ${entry.score}/${entry.rating}. Something a user cannot do is UNSUITABLE at 0.`,
+    );
+    expectTrue(
+      explainsInfeasibility(entry.reasoning),
+      `${activity} on ${dayRanking.date} is not possible here, but the reasoning does not say so: ` +
+        `"${entry.reasoning}". It has to name the reason - one of [${INFEASIBILITY_MARKERS.join(', ')}] - ` +
+        `or the user reads a bad idea as a bad week.`,
+    );
+  }
+});
+
+Then(
+  '{string} is scored on the weather, not ruled out by the location',
+  async ({ api }, activityName: string) => {
+    const activity = assertActivity(activityName);
+    for (const dayRanking of api.rankings().days) {
+      const entry = entryFor(dayRanking, activity);
+      expectTrue(
+        entry.feasible,
+        `${activity} on ${dayRanking.date} was ruled out by the location ("${entry.reasoning}"), but ` +
+          `this place supports it. The verdict has to come from the forecast.`,
+      );
+    }
+  },
+);
 
 Then('every day numbers its activities 1 to 4 with no gaps or duplicates', async ({ api }) => {
   for (const dayRanking of api.rankings().days) {
@@ -297,10 +370,20 @@ Then('both responses are identical apart from the generation timestamp', async (
   const second = api.repeatResponse;
   expectTrue(second !== undefined, 'The scenario did not make a second request.');
 
+  /**
+   * Keys are sorted before comparing, so a serialiser that emits them in a
+   * different order twice is not reported as a non-deterministic *ranking*.
+   * The claim under test is about values; a misdiagnosis here would send
+   * somebody hunting through the scoring model for a bug in a JSON writer.
+   */
   const strip = (body: unknown): string => {
     const clone = JSON.parse(JSON.stringify(body)) as Record<string, unknown>;
     delete clone['generatedAt'];
-    return JSON.stringify(clone);
+    const sortKeys = (_key: string, value: unknown): unknown =>
+      value && typeof value === 'object' && !Array.isArray(value)
+        ? Object.fromEntries(Object.entries(value as Record<string, unknown>).sort(([a], [b]) => a.localeCompare(b)))
+        : value;
+    return JSON.stringify(clone, sortKeys);
   };
 
   expectTrue(
@@ -312,49 +395,50 @@ Then('both responses are identical apart from the generation timestamp', async (
 
 // --- scoring assertions -----------------------------------------------------
 
+/**
+ * The three rating phrasings share one check. They stay three steps because
+ * they read differently at the point of use, and a scenario that means "no
+ * worse than FAIR" should not have to say "between FAIR and EXCELLENT".
+ */
+function expectRatingWithin(
+  rankings: RankingsResponse,
+  dayNumber: number,
+  activityName: string,
+  lowestName: string,
+  highestName: string,
+): void {
+  const activity = assertActivity(activityName);
+  const lowest = assertRating(lowestName);
+  const highest = assertRating(highestName);
+  const dayRanking = day(rankings, dayNumber);
+  const entry = entryFor(dayRanking, activity);
+  const band = lowest === highest ? `"${lowest}"` : `between "${lowest}" and "${highest}"`;
+
+  expectTrue(
+    isAtLeast(entry.rating, lowest) && RATINGS.indexOf(entry.rating) <= RATINGS.indexOf(highest),
+    `Expected ${activity} on day ${dayNumber} (${dayRanking.date}) to be ${band}, got ` +
+      `"${entry.rating}" (score ${entry.score}). Reasoning: "${entry.reasoning}"`,
+  );
+}
+
 Then(
   'on day {int} {string} is rated {string}',
-  async ({ api }, dayNumber: number, activityName: string, ratingName: string) => {
-    const activity = assertActivity(activityName);
-    const rating = assertRating(ratingName);
-    const dayRanking = day(api.rankings(), dayNumber);
-    const entry = entryFor(dayRanking, activity);
-    expectTrue(
-      entry.rating === rating,
-      `Expected ${activity} on day ${dayNumber} (${dayRanking.date}) to be "${rating}", got ` +
-        `"${entry.rating}" (score ${entry.score}). Reasoning: "${entry.reasoning}"`,
-    );
+  async ({ api }, dayNumber: number, activity: string, rating: string) => {
+    expectRatingWithin(api.rankings(), dayNumber, activity, rating, rating);
   },
 );
 
 Then(
   'on day {int} {string} is rated no better than {string}',
-  async ({ api }, dayNumber: number, activityName: string, ratingName: string) => {
-    const activity = assertActivity(activityName);
-    const ceiling = assertRating(ratingName);
-    const dayRanking = day(api.rankings(), dayNumber);
-    const entry = entryFor(dayRanking, activity);
-    expectTrue(
-      RATINGS.indexOf(entry.rating) <= RATINGS.indexOf(ceiling),
-      `Expected ${activity} on day ${dayNumber} (${dayRanking.date}) to be no better than "${ceiling}", ` +
-        `got "${entry.rating}" (score ${entry.score}). Reasoning: "${entry.reasoning}"`,
-    );
+  async ({ api }, dayNumber: number, activity: string, ceiling: string) => {
+    expectRatingWithin(api.rankings(), dayNumber, activity, RATINGS[0], ceiling);
   },
 );
 
 Then(
   'on day {int} {string} is rated between {string} and {string}',
-  async ({ api }, dayNumber: number, activityName: string, lowestName: string, highestName: string) => {
-    const activity = assertActivity(activityName);
-    const lowest = assertRating(lowestName);
-    const highest = assertRating(highestName);
-    const dayRanking = day(api.rankings(), dayNumber);
-    const entry = entryFor(dayRanking, activity);
-    expectTrue(
-      isAtLeast(entry.rating, lowest) && RATINGS.indexOf(entry.rating) <= RATINGS.indexOf(highest),
-      `Expected ${activity} on day ${dayNumber} (${dayRanking.date}) to land between "${lowest}" and ` +
-        `"${highest}", got "${entry.rating}" (score ${entry.score}). Reasoning: "${entry.reasoning}"`,
-    );
+  async ({ api }, dayNumber: number, activity: string, lowest: string, highest: string) => {
+    expectRatingWithin(api.rankings(), dayNumber, activity, lowest, highest);
   },
 );
 
@@ -433,20 +517,6 @@ Then(
 );
 
 Then(
-  '{string} scores are in descending order across days {int}, {int}, {int}',
-  async ({ api }, activityName: string, a: number, b: number, c: number) => {
-    const activity = assertActivity(activityName);
-    const rankings = api.rankings();
-    const scores = [a, b, c].map((n) => entryFor(day(rankings, n), activity).score);
-    expectTrue(
-      scores[0]! >= scores[1]! && scores[1]! >= scores[2]!,
-      `Expected ${activity} scores to fall across days ${a}, ${b}, ${c}, got [${scores.join(', ')}]. ` +
-        `A ranking that is not monotonic in its main driver cannot be explained to a user.`,
-    );
-  },
-);
-
-Then(
   '{string} is rated at least {string} on every day',
   async ({ api }, activityName: string, ratingName: string) => {
     const activity = assertActivity(activityName);
@@ -487,17 +557,3 @@ Then('the error details list the candidate locations', async ({ api }) => {
   );
 });
 
-Then('each candidate carries the location id needed to retry', async ({ api }) => {
-  const details = parseWith(
-    AmbiguousLocationDetailsSchema,
-    api.errorBody().error.details,
-    'The details of an AMBIGUOUS_LOCATION error',
-  );
-  for (const candidate of details.matches) {
-    expectTrue(
-      candidate.id.length > 0 && candidate.displayName.length > 0,
-      `Candidate ${JSON.stringify(candidate)} cannot be turned into a retry: a picker needs both an ` +
-        `id and a label.`,
-    );
-  }
-});

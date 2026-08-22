@@ -6,10 +6,12 @@ import { DEFAULT_PROFILE_KEY, getProfile, type DailyWeather } from './fixtures/w
  * An in-process stand-in for Open-Meteo.
  *
  * The API under test is expected to take its Open-Meteo base URLs from the
- * environment, so the suite points it here:
+ * environment, so the suite points it here. The literal 127.0.0.1 matters:
+ * this server binds to the IPv4 loopback, and a client that resolves
+ * "localhost" to ::1 finds nothing listening.
  *
- *   OPEN_METEO_GEOCODING_BASE_URL=http://localhost:8787/geocoding
- *   OPEN_METEO_FORECAST_BASE_URL=http://localhost:8787/forecast
+ *   OPEN_METEO_GEOCODING_BASE_URL=http://127.0.0.1:8787/geocoding
+ *   OPEN_METEO_FORECAST_BASE_URL=http://127.0.0.1:8787/forecast
  *
  * That keeps every scenario deterministic (a "25cm of powder" day is a fact,
  * not a hope about next Tuesday) and lets the suite exercise upstream
@@ -24,13 +26,23 @@ import { DEFAULT_PROFILE_KEY, getProfile, type DailyWeather } from './fixtures/w
 export interface GeoPlace {
   id: number;
   name: string;
-  admin1: string;
+  /** Open-Meteo omits admin1 for places it has no region for. */
+  admin1?: string;
+  /** The next level down - a county or district. Distinguishes same-named towns. */
+  admin2?: string;
   country: string;
   country_code: string;
   latitude: number;
   longitude: number;
   timezone: string;
-  population: number;
+  /** Null for the many small places Open-Meteo has no population figure for. */
+  population: number | null;
+  /**
+   * Open-Meteo's GeoNames feature code. `PPL*` is a populated place; airports
+   * and heliports (`AIRP`, `AIRH`) share their town's name and are not places
+   * anyone is going sightseeing in. Defaults to a settlement.
+   */
+  feature_code?: string;
 }
 
 export type UpstreamBehaviour =
@@ -38,8 +50,7 @@ export type UpstreamBehaviour =
   | 'server_error'
   | 'rate_limited'
   | 'timeout'
-  | 'malformed'
-  | 'bad_request';
+  | 'malformed';
 
 export interface RecordedRequest {
   service: 'geocoding' | 'forecast';
@@ -61,6 +72,52 @@ export function normalise(value: string): string {
 
 function isoDate(date: Date): string {
   return date.toISOString().slice(0, 10);
+}
+
+/**
+ * Real Open-Meteo, asked for `timezone=auto`, answers with the zone *and* the
+ * offset that zone was actually on that day. A double that names
+ * "Europe/Paris" and reports an offset of 0 serves a payload that cannot
+ * occur in production, and an implementation deriving local dates from the
+ * offset would never be caught on it here.
+ */
+function utcOffsetSeconds(timeZone: string, at: Date): number {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone,
+    hourCycle: 'h23',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+  }).formatToParts(at);
+
+  const field = (type: string): number => Number(parts.find((p) => p.type === type)?.value ?? '0');
+  const asIfUtc = Date.UTC(
+    field('year'),
+    field('month') - 1,
+    field('day'),
+    field('hour'),
+    field('minute'),
+    field('second'),
+  );
+
+  // Both sides are whole seconds; the millisecond part of `at` cancels out.
+  return Math.round((asIfUtc - at.getTime()) / 1000);
+}
+
+/** "GMT+2", "GMT-5" - the shape Open-Meteo uses for zones with no abbreviation. */
+function timezoneAbbreviation(offsetSeconds: number): string {
+  if (offsetSeconds === 0) return 'GMT';
+  const hours = offsetSeconds / 3600;
+  const rendered = Number.isInteger(hours) ? String(Math.abs(hours)) : Math.abs(hours).toFixed(2);
+  return `GMT${offsetSeconds > 0 ? '+' : '-'}${rendered}`;
+}
+
+/** How a place is named in a step: "Name, Region, Country", or "Name, Country". */
+function labelOf(place: GeoPlace): string {
+  return [place.name, place.admin1, place.country].filter(Boolean).join(', ');
 }
 
 export class FakeOpenMeteo {
@@ -160,12 +217,14 @@ export class FakeOpenMeteo {
 
   findPlaceByLabel(label: string): GeoPlace {
     const wanted = normalise(label);
-    const exact = this.places.filter(
-      (p) => normalise(`${p.name}, ${p.admin1}, ${p.country}`) === wanted,
-    );
+    // A town and its airfield share a label, so a step naming "Zermatt" means
+    // the village. This is fixture plumbing: the contract rule that drops
+    // airfields lives in the API, not here.
+    const settlements = this.places.filter((p) => (p.feature_code ?? 'PPL').startsWith('PPL'));
+    const exact = settlements.filter((p) => normalise(labelOf(p)) === wanted);
     if (exact.length === 1) return exact[0]!;
 
-    const byName = this.places.filter((p) => normalise(p.name) === wanted);
+    const byName = settlements.filter((p) => normalise(p.name) === wanted);
     if (byName.length === 1) return byName[0]!;
     if (byName.length > 1) {
       throw new Error(
@@ -236,10 +295,6 @@ export class FakeOpenMeteo {
           JSON.stringify({ error: true, reason: 'Daily API request limit exceeded. Please try again tomorrow.' }),
         );
         return;
-      case 'bad_request':
-        res.writeHead(400, { 'content-type': 'application/json' });
-        res.end(JSON.stringify({ error: true, reason: 'Cannot initialize WeatherVariable from invalid String value' }));
-        return;
       case 'malformed':
         res.writeHead(200, { 'content-type': 'application/json' });
         res.end('{"daily": {"time": ["2026-0');
@@ -254,17 +309,21 @@ export class FakeOpenMeteo {
   }
 
   private placePayload(place: GeoPlace): unknown {
+    // Open-Meteo omits keys it has no value for rather than sending null, so
+    // the double does too: an API that assumes they are always present breaks
+    // on the first small town.
     return {
       id: place.id,
       name: place.name,
       latitude: place.latitude,
       longitude: place.longitude,
       elevation: 25,
-      feature_code: 'PPL',
+      feature_code: place.feature_code ?? 'PPL',
       country_code: place.country_code,
-      admin1: place.admin1,
+      ...(place.admin1 === undefined ? {} : { admin1: place.admin1 }),
+      ...(place.admin2 === undefined ? {} : { admin2: place.admin2 }),
       timezone: place.timezone,
-      population: place.population,
+      ...(place.population === null ? {} : { population: place.population }),
       country: place.country,
     };
   }
@@ -273,9 +332,11 @@ export class FakeOpenMeteo {
     const name = normalise(query['name'] ?? '');
     const count = Number.parseInt(query['count'] ?? '10', 10) || 10;
 
+    // Served in catalogue order, deliberately unsorted. Ordering the results
+    // for a picker is the API's job, and a double that pre-sorts them would
+    // let a straight passthrough pass the "most prominent first" scenario.
     const matches = this.places
       .filter((p) => normalise(p.name).startsWith(name))
-      .sort((a, b) => b.population - a.population)
       .slice(0, count)
       .map((p) => this.placePayload(p));
 
@@ -310,22 +371,22 @@ export class FakeOpenMeteo {
     const column = <K extends keyof DailyWeather>(key: K): DailyWeather[K][] =>
       days.map((d) => d[key]);
 
+    const timezone = place?.timezone ?? 'GMT';
+    const offsetSeconds = utcOffsetSeconds(timezone, start);
+
     return {
       latitude,
       longitude,
       generationtime_ms: 0.18,
-      utc_offset_seconds: 0,
-      timezone: place?.timezone ?? 'GMT',
-      timezone_abbreviation: 'GMT',
+      utc_offset_seconds: offsetSeconds,
+      timezone,
+      timezone_abbreviation: timezoneAbbreviation(offsetSeconds),
       elevation: 25,
       daily_units: {
         time: 'iso8601',
         weather_code: 'wmo code',
         temperature_2m_max: '°C',
-        temperature_2m_min: '°C',
-        apparent_temperature_max: '°C',
         precipitation_sum: 'mm',
-        precipitation_probability_max: '%',
         snowfall_sum: 'cm',
         wind_speed_10m_max: 'km/h',
         wind_gusts_10m_max: 'km/h',
@@ -335,10 +396,7 @@ export class FakeOpenMeteo {
         time,
         weather_code: column('weather_code'),
         temperature_2m_max: column('temperature_2m_max'),
-        temperature_2m_min: column('temperature_2m_min'),
-        apparent_temperature_max: column('apparent_temperature_max'),
         precipitation_sum: column('precipitation_sum'),
-        precipitation_probability_max: column('precipitation_probability_max'),
         snowfall_sum: column('snowfall_sum'),
         wind_speed_10m_max: column('wind_speed_10m_max'),
         wind_gusts_10m_max: column('wind_gusts_10m_max'),

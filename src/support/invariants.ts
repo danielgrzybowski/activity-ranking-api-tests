@@ -1,8 +1,10 @@
 import { AssertionError } from 'node:assert';
 import {
+  ACTIVITIES,
   INDOOR_SIGHTSEEING_MINIMUM_SCORE,
   REASONING_MAX_LENGTH,
   expectedRankOrder,
+  explainsVerdict,
   ratingForScore,
 } from './domain';
 import { RankingsResponseSchema, type RankingsResponse } from './schemas';
@@ -59,6 +61,13 @@ export function assertRankingInvariants(rankings: RankingsResponse): void {
             `the ${REASONING_MAX_LENGTH}-character budget: "${entry.reasoning}"`,
         );
       }
+      if (!explainsVerdict(entry.reasoning, entry.feasible)) {
+        fail(
+          `${entry.activity} on ${day.date} gives the user no reason they can act on: ` +
+            `"${entry.reasoning}". A verdict has to name the weather behind it, or - where the ` +
+            `place cannot support the activity at all - say that instead.`,
+        );
+      }
     }
 
     const indoor = day.activities.find((a) => a.activity === 'INDOOR_SIGHTSEEING');
@@ -67,6 +76,48 @@ export function assertRankingInvariants(rankings: RankingsResponse): void {
         `INDOOR_SIGHTSEEING scored ${indoor.score} on ${day.date}, below the documented floor of ` +
           `${INDOOR_SIGHTSEEING_MINIMUM_SCORE}. A user must always have one workable option.`,
       );
+    }
+  }
+
+  assertFeasibilityIsConstant(rankings);
+}
+
+/**
+ * Whether a place has a coast or a ski area is a property of the place, not of
+ * Tuesday. So an activity marked infeasible on any day must be marked that way
+ * on every day of the same forecast, and must be UNSUITABLE at 0 throughout -
+ * a coastline does not appear halfway through the week.
+ *
+ * This is the shape of bug a per-day feasibility check produces, and no single
+ * scenario would see it: each day looks defensible on its own.
+ */
+function assertFeasibilityIsConstant(rankings: RankingsResponse): void {
+  for (const activity of ACTIVITIES) {
+    const entries = rankings.days.flatMap((day) => {
+      const entry = day.activities.find((a) => a.activity === activity);
+      return entry ? [{ date: day.date, entry }] : [];
+    });
+
+    const infeasible = entries.filter((e) => !e.entry.feasible);
+    if (infeasible.length === 0) continue;
+
+    if (infeasible.length !== entries.length) {
+      const feasible = entries.filter((e) => e.entry.feasible).map((e) => e.date);
+      fail(
+        `${activity} is marked not possible at this location on ${infeasible.length} of ` +
+          `${entries.length} days, but feasible on ${feasible.join(', ')}. ` +
+          `A coast does not appear halfway through a forecast.`,
+      );
+    }
+
+    for (const { date, entry } of infeasible) {
+      if (entry.score !== 0 || entry.rating !== 'UNSUITABLE') {
+        fail(
+          `${activity} on ${date} is marked not possible at this location ("${entry.reasoning}") ` +
+            `but scores ${entry.score}/${entry.rating}. A user cannot act on that, so it must be ` +
+            `UNSUITABLE at 0.`,
+        );
+      }
     }
   }
 }

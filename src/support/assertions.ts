@@ -65,18 +65,6 @@ export function expectEqual<T>(actual: T, expected: T, what: string): void {
   }
 }
 
-export function expectDeepEqual(actual: unknown, expected: unknown, what: string): void {
-  const a = JSON.stringify(actual);
-  const b = JSON.stringify(expected);
-  if (a !== b) {
-    throw new AssertionError({
-      message: `Expected ${what} to be ${b}, got ${a}`,
-      actual,
-      expected,
-    });
-  }
-}
-
 export function expectTrue(condition: boolean, message: string): void {
   if (!condition) throw new AssertionError({ message });
 }
