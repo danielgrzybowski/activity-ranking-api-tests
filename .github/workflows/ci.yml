@@ -8,6 +8,10 @@ on:
 jobs:
   verify:
     runs-on: ubuntu-latest
+    # A hang is the failure mode worth bounding here: the whole pipeline is
+    # seconds of work, so anything still running at 15 minutes is stuck, and
+    # without this it stays stuck until the runner's own six-hour limit.
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
 
