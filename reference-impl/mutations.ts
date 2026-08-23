@@ -25,6 +25,8 @@ export const MUTATIONS = {
   keep_airfields: "Offer Open-Meteo's airports and heliports as places to visit, alongside the towns they are named after",
   flat_display_names: 'Always label a place "Name, Region, Country", even where another result in the same response reads identically',
   echo_origin_without_vary: "Echo the caller's Origin back as Access-Control-Allow-Origin without a Vary: Origin beside it",
+  generic_reasoning: 'Explain every activity on a day with the same weather summary, instead of a reason per activity',
+  prefix_match_city: 'Resolve `city` by prefix, so "Cham" ranks Chamonix',
 } as const;
 
 export type Mutation = keyof typeof MUTATIONS;

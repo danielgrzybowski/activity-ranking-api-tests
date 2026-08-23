@@ -4,14 +4,14 @@ A Gherkin/TypeScript specification for the **Activity Ranking API**: search for 
 pick one of the matches, get seven days ranked across Skiing, Surfing, Outdoor Sightseeing and
 Indoor Sightseeing, each with a suitability and a plain-English reason.
 
-The API does not exist yet. `npm test` is **red on purpose** — 58 scenarios (87 with `Scenario
+The API does not exist yet. `npm test` is **red on purpose** — 62 scenarios (92 with `Scenario
 Outline` examples expanded) describing the API someone is about to build.
 
 ```bash
 npm install
 npm test              # the specification — red today, by design
 npm run demo:green    # the same scenarios against reference-impl/ — green
-npm run mutation-run  # 10 deliberate defects, all 10 caught
+npm run mutation-run  # 12 deliberate defects, all 12 caught
 npm run demo:live     # the 3 @live scenarios, reference impl vs. the real Open-Meteo
 ```
 
@@ -61,21 +61,22 @@ constant temperature and wind. The location counts as a variable too — the sam
 **Some rules can't be reached by a scenario that names them** — the alphabetical tie-break only
 matters when two activities happen to tie. `src/support/invariants.ts` runs against every 200 the
 suite receives: rank contiguity, score↔rating agreement, the reasoning budget, that every reasoning
-names a weather driver or says why the place rules the activity out, the indoor floor, and that
-geography rules an activity out for the whole week or not at all.
+names a weather driver or says why the place rules the activity out, that no two activities on a day
+are explained by the same sentence, the indoor floor, and that geography rules an activity out for
+the whole week or not at all.
 
-**How I know the red state is a good one.** `demo:green` runs all 87 scenarios against
-`reference-impl/` and they pass. `mutation-run` then breaks that implementation ten ways — a 429
-reported as a 502, ambiguity resolved silently, the tie-break reversed, and seven more — and counts
-the scenarios that notice. All ten are caught.
+**How I know the red state is a good one.** `demo:green` runs all 92 scenarios against
+`reference-impl/` and they pass. `mutation-run` then breaks that implementation twelve ways — a 429
+reported as a 502, ambiguity resolved silently, the tie-break reversed, and nine more — and counts
+the scenarios that notice. All twelve are caught.
 
 The indoor-floor mutant took two attempts, and the first is the more useful story. Deleting the
 `Math.max` changed no output at all: that implementation's indoor score is `88 - outdoor × 0.45` and
 cannot fall below 43, so a floor at 40 was unreachable. That mutant measured nothing about the suite
 — the floor invariant was there and correct throughout — so it was replaced with the model an
 implementation *without* a floor actually writes, indoor as a plain mirror of the outdoors, which
-reaches 0 on a clear summer afternoon. A 10/10 that comes from fixing the mutation is worth stating;
-one that comes from tuning the assertions would not be.
+reaches 0 on a clear summer afternoon. A clean sweep that comes from fixing the mutation is worth
+stating; one that comes from tuning the assertions would not be.
 
 `echo_origin_without_vary` is in the set for a different reason. The `Vary: Origin` check is vacuous
 against an implementation that answers `*`, which this one does, so without a mutant that echoes the
@@ -98,6 +99,8 @@ for that reason alone — each is a screen that would otherwise be broken:
 | `409` carrying `details.matches` | The picker renders from the error body, no second round trip |
 | `feasible` as a field, not inferred from prose | "Sea breeze, 19°C" is a good day at the beach, not a statement that there is no sea |
 | Indoor sightseeing floored at `FAIR` | No day can show four dead ends |
+| A reason per activity, not one weather summary | "Indoor Sightseeing — FAIR — grey at 16°C" is a weather report standing where a reason should be |
+| `city` matches a whole name, `q` matches a prefix | The endpoint that guesses is the typeahead; the one that spends forecast quota is not |
 | One error envelope, stated latency budgets | One handler instead of nine; 500 ms so the typeahead feels instant, 2000 ms so the spinner stays plausible |
 | `Vary: Origin` wherever the CORS header names one origin | `Cache-Control: public` and a per-caller header on one response is a CDN handing the first origin's permission to the next, and a browser blocking a response it was entitled to |
 
@@ -121,15 +124,24 @@ so. Below is what a schema cannot carry.
 ```
 
 A `Location` carries `id`, `name`, `country`, `countryCode`, `region`, `latitude`, `longitude`,
-`timezone`, `population`, `displayName`. `region` and `population` are nullable — Open-Meteo has
-neither for plenty of real places — and `displayName` drops the parts that do not exist
-(`"Nazaré, Portugal"`, never `"Nazaré, , Portugal"`). `limit` counts towns, not rows the upstream
+`timezone`, `population`, `displayName`. `country`, `region` and `population` are nullable —
+Open-Meteo has none of the three for plenty of real places, and files at least one town with a
+country code and no country name — and `displayName` drops the parts that do not exist
+(`"Tombali, Guinea-Bissau"`, never `"Tombali, , Guinea-Bissau"`). `countryCode` is always present, so a client
+can render a flag for a place whose country it cannot name. `limit` counts towns, not rows the upstream
 sent: filtering runs after Open-Meteo's cap, so the API over-fetches and trims.
 
 ### `GET /v1/rankings?locationId=|city=&days=`
 
 Exactly one of `locationId` / `city`. `days` 1–7, default 7, passed through as `forecast_days`
 rather than trimmed afterwards.
+
+`city` matches a **whole** name, case- and accent-insensitively — not a prefix. Open-Meteo's
+geocoding is a prefix search, which is right for the typeahead and wrong here: `Cham` is four
+characters of Chamonix and also a town of 17,000 in Canton of Zug, so passing the prefix results
+through would rank whichever the upstream sorted first and never tell the user which. A fragment is
+`404`, with a message pointing at `/v1/locations`; several places sharing the whole name is the
+`409` below.
 
 ```jsonc
 // 200
@@ -165,7 +177,7 @@ One envelope: `{ "error": { "code": …, "message": …, "details": … } }`.
 | 400 | `INVALID_QUERY` | `q`/`city` too short, bad `limit`, or a parameter supplied twice |
 | 400 | `MISSING_LOCATION` / `CONFLICTING_LOCATION_PARAMS` | Neither, or both, of `locationId` and `city` |
 | 400 | `INVALID_DAYS` | `days` outside 1–7 |
-| 404 | `LOCATION_NOT_FOUND` | Nothing matched |
+| 404 | `LOCATION_NOT_FOUND` | No place has that id, or that exact name |
 | 409 | `AMBIGUOUS_LOCATION` | Several places matched; `details.matches` carries them |
 | 502 / 503 / 504 | `UPSTREAM_UNAVAILABLE` / `UPSTREAM_RATE_LIMITED` / `UPSTREAM_TIMEOUT` | Open-Meteo broke, rate-limited us (sets `Retry-After`), or did not answer |
 
@@ -208,34 +220,53 @@ to assert the *request* — right coordinates, right `forecast_days`, a timezone
 variables the ranking reads. A wrong upstream query is an outage nobody notices.
 
 The double reproduces real quirks: no matches omits `results` entirely rather than returning `[]`,
-and a place with no region or population omits those keys rather than sending `null`.
+and a place with no region, population or country omits those keys rather than sending `null`.
+
+**Verifying the double against reality.** Two checks touch the real service, both on a schedule
+rather than on a commit. `@live` covers payload drift: the double could stop resembling Open-Meteo
+and every other test would still pass. `npm run verify-fixtures` covers the other half — the places
+themselves. Every pinned id is looked up in the live catalogue and compared, because the double
+serves whatever the fixture says, so a made-up town is invisible to all 92 scenarios at once. It has
+caught four: an id that is an air base in Murcia, a `Zürich` the English catalogue spells `Zurich`,
+coordinates 137 km from the town they name, and a Nazaré pinned as having no region when the entire
+scenario built on it depends on that being true. The identity of a place is an error; a population
+that has moved on is a warning, because it will move again.
 
 **Quota:** the whole spec suite costs zero upstream calls, however many scenarios it grows to.
-`demo:green` and `mutation-run` also run entirely against the double. Only `@live` touches the real
-service — one run is five calls, measured — and it is a separate Playwright project, excluded from
-`npm test` and from CI. It asserts the contract and nothing about the catalogue, so a renamed region
+`demo:green` and `mutation-run` also run entirely against the double. Only `@live` and
+`verify-fixtures` touch the real service — five calls and one per pinned id — and `@live` is a
+separate Playwright project, excluded from `npm test` and from CI. It asserts the contract and nothing about the catalogue, so a renamed region
 does not turn it red.
 
 ---
 
 ## Assumptions
 
-1. **The API is deployed and reachable over HTTP.** The suite is black-box and never imports it.
-2. **Open-Meteo base URLs are configurable via environment variables.** Without that seam the
+1. **`rank` orders the four activities within a day, not the seven days within an activity.** The
+   ticket's "ranks each day for each activity" reads both ways, and it is the largest interpretive
+   call in this contract. The headline sentence settles it — "a ranked list of activities … for the
+   next 7 days" — so `rank` runs 1 to 4 inside one day, and the schema pins it to the number of
+   activities rather than to a day count. Comparing days is left to the client, which has `score`
+   on every entry and can sort by it: "when should I ski this week" is a sort, not a second
+   ranking. Returning both numbers would put two different meanings of "rank" in one payload and
+   invite a front end to render the wrong one.
+2. **The API is deployed and reachable over HTTP.** The suite is black-box and never imports it.
+3. **Open-Meteo base URLs are configurable via environment variables.** Without that seam the
    weather scenarios cannot be deterministic. It is the only demand made of the implementation's
    internals.
-3. **Open-Meteo's free tier**, default units, geocoding via `/v1/search` and `/v1/get`, and a
+4. **Open-Meteo's free tier**, default units, geocoding via `/v1/search` and `/v1/get`, and a
    `feature_code` on results where `PPL*` means a populated place.
-4. **`locationId` is the Open-Meteo place id**, surfaced as a string so it stays opaque. Ids and
-   coordinates in the fixtures are real; the weather is constructed.
-5. **Dates start today in the location's timezone.** Scenarios assert against the date the upstream
+5. **`locationId` is the Open-Meteo place id**, surfaced as a string so it stays opaque. Ids and
+   coordinates in the fixtures are real — `npm run verify-fixtures` is what keeps that true rather
+   than merely claimed; the weather is constructed.
+6. **Dates start today in the location's timezone.** Scenarios assert against the date the upstream
    returned rather than a clock, so the suite cannot fail at midnight.
-6. **The API can tell whether a place has a surfable coast and a reachable ski area.** The suite
+7. **The API can tell whether a place has a surfable coast and a reachable ski area.** The suite
    asserts the behaviour and says nothing about where the answer comes from.
-7. **The typeahead client debounces.** The 500 ms budget and the upstream quota both assume it; the
+8. **The typeahead client debounces.** The 500 ms budget and the upstream quota both assume it; the
    API cannot enforce it and does not rate limit, so a client that hammers burns the quota and
    surfaces it as `503` — which reads like the provider's fault. Worth a rate limit before shipping.
-8. **No auth, no per-user state.** Nothing in the ticket implies either.
+9. **No auth, no per-user state.** Nothing in the ticket implies either.
 
 ---
 
@@ -257,9 +288,13 @@ swell proxy to keep the contract to two upstream services. The *shape* of the ju
 band, bad at both extremes — is the same. First follow-up, and it pays twice: wave height for the
 scoring, and the Marine API's rejection of inland coordinates for the feasibility check.
 
-**Nulls inside `daily` arrays.** Open-Meteo really does return them (1 in 16 for
-`precipitation_probability_max` when I checked) and the double never does, so nothing says what the
-API should do with a hole in the forecast. Reading it as zero would mean inventing weather.
+**Nulls inside `daily` arrays.** The double never emits one, so nothing says what the API should do
+with a hole in the forecast, and reading it as zero would mean inventing weather. It is worth being
+precise about how big the risk is, though, because I was not: measured across ten locations,
+`precipitation_probability_max` came back with no nulls at all over a seven-day window, and 6 in 160
+over sixteen days — every one of them on day 16, the far end of the model's range. `days` is capped
+at 7 here, so the hole is real but sits outside the window this contract asks for. It moves up this
+list the day somebody widens that cap.
 
 **The feasibility data is stubbed.** `reference-impl/terrain.ts` is a hand-written list of coastline
 and ski-area points sized to the places the suite exercises — enough to prove the rule implementable,
@@ -275,6 +310,15 @@ is untested.
 `'s-Hertogenbosch` are real. The safety property is "never 500", tested with injection-shaped input,
 not "reject unusual characters". What is missing is the positive half — nothing proves a name with an
 apostrophe still works, so an implementation that "sanitises" input would pass.
+
+**Reasoning is checked for distinctness, not for meaning.** Nothing verifies that the sentence under
+Skiing is *about* skiing — only that it names a weather driver, and that it is not the same sentence
+as the one under Indoor Sightseeing. An implementation that swapped two activities' reasonings would
+pass. Checking the semantics properly means either a keyword table per activity, which re-specifies
+the scoring model inside the assertions and goes stale the first time the copy is rewritten, or a
+model in the assertion path, which is non-deterministic — and a spec suite that cannot say why it
+went red is worse than one that misses this. Distinctness is the part a machine checks cheaply and
+never argues with, and it is what the `generic_reasoning` mutation confirms is load-bearing.
 
 **Caching is asserted at the header, not the behaviour.** Whether a second identical request skips
 Open-Meteo is an implementation choice; pinning it would forbid a legitimate cache-less design.
@@ -297,7 +341,7 @@ features/            the specification, plus thin step definitions
 src/support/         domain vocabulary, zod schemas, invariants, the Open-Meteo double, fixtures
 reference-impl/      a conforming API, used only to prove the suite satisfiable and its assertions
                      load-bearing; mutations.ts holds the deliberate defects
-scripts/             demo-green, mutation-run, selfcheck, stub-upstream
+scripts/             demo-green, mutation-run, selfcheck, stub-upstream, verify-fixtures
 ```
 
 `src/support` is runner-agnostic apart from `fixtures.ts` and `api-client.ts`: moving from Cucumber
@@ -312,8 +356,11 @@ definitions, and arguing the opposite verdict for a profile to find scenarios th
 taste rather than behaviour.
 
 Two things caught defects mechanically — the reference implementation found two scenarios passing for
-the wrong reason, and `@live` found a `displayName` rule that did not survive four pairs of Londons
-sharing a US state. **Most of the rest came from interrogating the output rather than running it.**
+the wrong reason, and `@live` earned its keep twice: a `displayName` rule that did not survive four
+pairs of Londons sharing a US state, and a `country: string` in the schema that did not survive a
+London in Guadeloupe that Open-Meteo files with a country code and no country name. Neither is
+reachable from a double built out of what I expected the catalogue to contain, which is the whole
+argument for having the drift check at all. **Most of the rest came from interrogating the output rather than running it.**
 AI produces work that is plausible, internally consistent and green against its own tests, and that
 is the failure mode to watch: surfing rated `FAIR` for a landlocked valley, four of nine fixture ids
 wrong against the real service, a double whose metadata was invented rather than verified, a comment

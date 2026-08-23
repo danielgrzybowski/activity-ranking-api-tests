@@ -14,7 +14,7 @@ import { strict as assert } from 'node:assert';
 import { FakeOpenMeteo } from '../src/support/fake-open-meteo';
 import { DEFAULT_PLACES } from '../src/support/fixtures/places';
 import { WEATHER_PROFILES, getProfile } from '../src/support/fixtures/weather-profiles';
-import { ACTIVITIES, explainsVerdict, ratingForScore } from '../src/support/domain';
+import { ACTIVITIES, explainsVerdict, ratingForScore, sharedReasonings } from '../src/support/domain';
 import { LocationsResponseSchema, RankingsResponseSchema } from '../src/support/schemas';
 
 const checks: { name: string; run: () => Promise<void> | void }[] = [];
@@ -64,14 +64,26 @@ check('the double reproduces the gaps in real Open-Meteo payloads', async () => 
   assert.equal('admin1' in match.body.results[0], false, 'an unknown region is an absent key, not null');
   assert.equal('population' in match.body.results[0], false, 'an unknown population is an absent key');
 
+  const noCountry = await getJson(`${fake.geocodingBaseUrl}/v1/search?name=Naza`);
+  assert.equal('country' in noCountry.body.results[0], true, 'a known country is still sent');
+
+  fake.setPlaces([
+    { id: 2, name: 'London', country_code: 'GP', latitude: 16.26487, longitude: -61.48832, timezone: 'America/Guadeloupe', population: null },
+  ]);
+  const gp = await getJson(`${fake.geocodingBaseUrl}/v1/search?name=London`);
+  assert.equal('country' in gp.body.results[0], false, 'a missing country is an absent key too');
+  assert.equal(gp.body.results[0].country_code, 'GP', 'the code is there even when the name is not');
+
   const none = await getJson(`${fake.geocodingBaseUrl}/v1/search?name=Qwertyville`);
   assert.equal('results' in none.body, false, 'no matches omits `results` entirely, as the real service does');
 });
 
 check('geocoding is accent-insensitive, resolves by id, and 404s an unknown one', async () => {
   reset();
-  const accented = await getJson(`${fake.geocodingBaseUrl}/v1/search?name=zurich`);
-  assert.equal(accented.body.results[0].name, 'Zürich');
+  // The live catalogue spells it "Zurich" under language=en, so the accent is
+  // on the query side: what a user types has to reach a plainly-spelled town.
+  const accented = await getJson(`${fake.geocodingBaseUrl}/v1/search?name=z%C3%BCrich`);
+  assert.equal(accented.body.results[0].name, 'Zurich');
 
   const found = await getJson(`${fake.geocodingBaseUrl}/v1/get?id=${CHAMONIX.id}`);
   assert.equal(found.body.timezone, 'Europe/Paris');
@@ -156,6 +168,25 @@ check('a reasoning that explains nothing is rejected, whatever its length', () =
       `"${reasoning}" (feasible: ${feasible}) must be ${expected ? 'accepted' : 'rejected'}`,
     );
   }
+});
+
+check('two activities explained by the same sentence are caught', () => {
+  // Also silent if it has a hole: this runs against every 200 the suite sees,
+  // so a broken rule fails nothing and looks exactly like a passing one.
+  const distinct = sharedReasonings([
+    { activity: 'SKIING', reasoning: '25cm of fresh powder at -4°C.' },
+    { activity: 'OUTDOOR_SIGHTSEEING', reasoning: 'Clear skies, dry and 22°C.' },
+  ]);
+  assert.equal(distinct.length, 0, 'two different sentences are not a collision');
+
+  // Case and whitespace are formatting, not meaning: still the same sentence.
+  const shared = sharedReasonings([
+    { activity: 'OUTDOOR_SIGHTSEEING', reasoning: 'Clear skies, dry and 22°C.' },
+    { activity: 'INDOOR_SIGHTSEEING', reasoning: 'clear skies,  dry and 22°C. ' },
+    { activity: 'SKIING', reasoning: 'No snow at 22°C.' },
+  ]);
+  assert.equal(shared.length, 1);
+  assert.deepEqual(shared[0]!.activities, ['OUTDOOR_SIGHTSEEING', 'INDOOR_SIGHTSEEING']);
 });
 
 check('the contract schemas accept a good payload and reject the ways it can go wrong', () => {

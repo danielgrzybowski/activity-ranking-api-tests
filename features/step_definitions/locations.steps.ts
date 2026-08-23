@@ -104,16 +104,6 @@ Then('the last result is {string}', async ({ api }, displayName: string) => {
   );
 });
 
-/** Used by the live specs, where the catalogue is whatever Open-Meteo says today. */
-Then('a result in {string} is returned', async ({ api }, country: string) => {
-  const results = api.locations().results;
-  expectTrue(
-    results.some((r) => r.country === country),
-    `Expected at least one result in ${country}, got ` +
-      `[${results.map((r) => `${r.displayName} (${r.country})`).join(' | ') || '<none>'}]`,
-  );
-});
-
 function resultNamed(results: LocationsResponse['results'], displayName: string) {
   const match = results.find((r) => r.displayName === displayName);
   if (!match) {
@@ -134,6 +124,19 @@ Then('the result {string} has no population', async ({ api }, displayName: strin
   expectTrue(
     result.population === null,
     `Expected an unknown population to be reported as null, got ${JSON.stringify(result.population)}.`,
+  );
+});
+
+/**
+ * Open-Meteo files a handful of real places with a country code and no country
+ * name. Dropping them would make a real place unreachable; inventing a name
+ * from the code would be a fact the API made up.
+ */
+Then('the result {string} has no country', async ({ api }, displayName: string) => {
+  const result = resultNamed(api.locations().results, displayName);
+  expectTrue(
+    result.country === null,
+    `Expected a missing country to be reported as null, got ${JSON.stringify(result.country)}.`,
   );
 });
 

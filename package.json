@@ -18,6 +18,7 @@
     "validate": "bddgen",
     "selfcheck": "tsx scripts/selfcheck.ts",
     "stub-upstream": "tsx scripts/stub-upstream.ts",
+    "verify-fixtures": "tsx scripts/verify-fixtures.ts",
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {

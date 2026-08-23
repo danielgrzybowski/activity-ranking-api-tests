@@ -217,6 +217,14 @@ export function rankDay(day: DailyWeather, terrain: Terrain): ScoredActivity[] {
     { activity: 'INDOOR_SIGHTSEEING', feasible: true, ...indoor(day, out.score) },
   ];
 
+  // The cheap implementation of "reasoning": one summary of the day, pasted
+  // under every card. Applied only where the activity is possible, so the
+  // rule under test is the only one that can catch it - an infeasible entry
+  // still says why, and `explainsVerdict` stays out of the measurement.
+  if (mutated('generic_reasoning')) {
+    for (const entry of entries) if (entry.feasible) entry.reasoning = out.reasoning;
+  }
+
   // Ties break alphabetically, so two equally good activities do not swap
   // places between refreshes.
   return entries

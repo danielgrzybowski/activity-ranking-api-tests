@@ -24,7 +24,6 @@ Feature: A thin check against the real Open-Meteo service
   # two distinct towns that both label as "London, Alabama, United States",
   # which is what forced a colliding label to reach for the county.
   @smoke
-  @smoke
   Scenario: A real search returns places a picker can tell apart
     When I search for locations matching "London"
     Then the response status is 200

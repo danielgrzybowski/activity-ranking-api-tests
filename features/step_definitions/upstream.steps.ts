@@ -33,13 +33,14 @@ interface PlaceRow {
 function toPlace(row: PlaceRow): GeoPlace {
   const region = row.region.trim();
   const subregion = row.subregion?.trim() ?? '';
+  const country = row.country.trim();
   const population = row.population.trim();
   return {
     id: Number.parseInt(row.id, 10),
     name: row.name,
     ...(region === '' ? {} : { admin1: region }),
     ...(subregion === '' ? {} : { admin2: subregion }),
-    country: row.country,
+    ...(country === '' ? {} : { country }),
     country_code: row.countryCode,
     latitude: Number.parseFloat(row.latitude),
     longitude: Number.parseFloat(row.longitude),

@@ -8,7 +8,7 @@
  */
 
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
-import { UpstreamError, getForecast, getPlace, searchPlaces, type Place } from './open-meteo';
+import { UpstreamError, findPlacesNamed, getForecast, getPlace, searchPlaces, type Place } from './open-meteo';
 import { MUTATIONS, activeMutations, mutated } from './mutations';
 import { rankDay } from './scoring';
 import { terrainAt } from './terrain';
@@ -181,9 +181,14 @@ async function resolveLocation(params: URLSearchParams): Promise<Place> {
         `"city" must be at least ${MIN_QUERY_LENGTH} characters long.`,
       );
     }
-    const matches = await searchPlaces(city.trim(), 10);
+    // Exact name, not prefix: partial names are what /v1/locations is for.
+    const matches = await findPlacesNamed(city.trim());
     if (matches.length === 0) {
-      throw new ApiError(404, 'LOCATION_NOT_FOUND', `No location matched "${city}".`);
+      throw new ApiError(
+        404,
+        'LOCATION_NOT_FOUND',
+        `No city or town is named "${city}". Search /v1/locations for a partial name.`,
+      );
     }
     if (matches.length === 1 || mutated('resolve_ambiguous_silently')) return matches[0]!;
     // Guessing would eventually rank Ontario's weather for someone standing in

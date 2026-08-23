@@ -10,6 +10,7 @@ import {
   explainsVerdict,
   isAtLeast,
   ratingForScore,
+  sharedReasonings,
   type Activity,
   type Rating,
 } from '../../src/support/domain';
@@ -235,6 +236,24 @@ Then('every reasoning gives a reason the user can act on', async ({ api }) => {
         explainsVerdict(entry.reasoning, entry.feasible),
         `${entry.activity} on ${dayRanking.date} gives no reason a user could act on: ` +
           `"${entry.reasoning}"`,
+      );
+    }
+  }
+});
+
+/**
+ * The rule lives in `sharedReasonings` for the same reason `explainsVerdict`
+ * does: invariants.ts holds it against every 200 the suite receives, and a
+ * second copy here could drift away from the one that runs everywhere.
+ */
+Then('no two activities on a day share the same reasoning', async ({ api }) => {
+  for (const dayRanking of api.rankings().days) {
+    for (const shared of sharedReasonings(dayRanking.activities)) {
+      expectTrue(
+        false,
+        `On ${dayRanking.date}, ${shared.activities.join(' and ')} carry the same sentence: ` +
+          `"${shared.reasoning}". The user is told what the weather is doing, not why one ` +
+          `activity beat another.`,
       );
     }
   }

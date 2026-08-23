@@ -32,9 +32,9 @@ Feature: Turning what the user typed into the place we rank
     And the resolved location is "Paris, Ile-de-France, France"
 
   Scenario: City names are matched without regard to case or accents
-    When I request rankings for the city "zurich"
+    When I request rankings for the city "zürich"
     Then the response status is 200
-    And the resolved location is "Zürich, Zurich, Switzerland"
+    And the resolved location is "Zurich, Canton of Zurich, Switzerland"
 
   Scenario: A town whose airfield shares its name still resolves without asking
     A small town with an airstrip nearby comes back as two matches, and the
@@ -46,6 +46,32 @@ Feature: Turning what the user typed into the place we rank
     When I request rankings for the city "Zermatt"
     Then the response status is 200
     And the resolved location is "Zermatt, Valais, Switzerland"
+
+  Scenario: A half-typed name is not a ranking input
+    Partial names are what the search endpoint is for. "Cham" is the first four
+    characters of Chamonix and also a real town of 17,000 people in Switzerland,
+    so an API that prefix-matched here would rank whichever of the two the
+    upstream happened to sort first - and the user who typed it would have no
+    way to tell which one they got.
+
+    When I request rankings for the city "Cham"
+    Then the response status is 404
+    And the error code is "LOCATION_NOT_FOUND"
+    And Open-Meteo's forecast service was not called
+
+  Scenario: A city whose name starts another city's name still resolves to itself
+    The other half of the rule, and the half an over-eager fix breaks. Both
+    places below are real and both are what Open-Meteo returns for "Cham":
+    rejecting the shorter name because a longer one starts with it would make a
+    town unreachable by the name it actually has.
+
+    Given Open-Meteo's place catalogue contains:
+      | id      | name     | region        | country     | countryCode | latitude | longitude | timezone      | population |
+      | 2661228 | Cham     | Canton of Zug | Switzerland | CH          | 47.18213 | 8.46358   | Europe/Zurich | 16719      |
+      | 3027301 | Chamonix | Rhône-Alpes   | France      | FR          | 45.92375 | 6.86933   | Europe/Paris  | 10614      |
+    When I request rankings for the city "Cham"
+    Then the response status is 200
+    And the resolved location is "Cham, Canton of Zug, Switzerland"
 
   Scenario: An ambiguous city name asks the user to choose
     Silently picking the biggest London would eventually rank Ontario's

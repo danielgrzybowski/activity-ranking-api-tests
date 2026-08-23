@@ -83,8 +83,8 @@ export const DEFAULT_PLACES: GeoPlace[] = [
   },
   {
     id: 2657896,
-    name: 'Zürich',
-    admin1: 'Zurich',
+    name: 'Zurich',
+    admin1: 'Canton of Zurich',
     country: 'Switzerland',
     country_code: 'CH',
     latitude: 47.36667,

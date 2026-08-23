@@ -11,7 +11,13 @@ export const LocationSchema = z
   .object({
     id: z.string().min(1),
     name: z.string().min(1),
-    country: z.string().min(1),
+    /**
+     * Null where Open-Meteo has no country name for the place. It really does
+     * happen: id 11546715 is a London in Guadeloupe filed with a country code
+     * and no country. `countryCode` is always there, so a client can still
+     * render a flag.
+     */
+    country: z.string().min(1).nullable(),
     countryCode: z.string().length(2),
     /** Null where Open-Meteo has no region for the place; the API must not invent one. */
     region: z.string().min(1).nullable(),

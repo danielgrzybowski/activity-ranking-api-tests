@@ -30,7 +30,8 @@ export interface GeoPlace {
   admin1?: string;
   /** The next level down - a county or district. Distinguishes same-named towns. */
   admin2?: string;
-  country: string;
+  /** Open-Meteo omits the country name for a handful of real places. */
+  country?: string;
   country_code: string;
   latitude: number;
   longitude: number;
@@ -324,7 +325,7 @@ export class FakeOpenMeteo {
       ...(place.admin2 === undefined ? {} : { admin2: place.admin2 }),
       timezone: place.timezone,
       ...(place.population === null ? {} : { population: place.population }),
-      country: place.country,
+      ...(place.country === undefined ? {} : { country: place.country }),
     };
   }
 

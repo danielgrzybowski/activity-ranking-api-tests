@@ -140,6 +140,36 @@ export function explainsVerdict(reasoning: string, feasible: boolean): boolean {
   return WEATHER_VOCABULARY.some((word) => text.includes(word)) || MEASUREMENT_PATTERN.test(text);
 }
 
+/**
+ * Two activities on the same day must not be explained by the same sentence.
+ *
+ * The cheapest implementation of "reasoning" is one weather summary pasted
+ * under all four cards, and every other rule here passes it: it is inside the
+ * length budget, it names a weather driver, and it agrees with no rating in
+ * particular. What the user reads is "Indoor Sightseeing - FAIR - Clear skies
+ * and 22C", which is a weather report standing where a reason should be, and
+ * leaves them unable to tell why one activity beat another.
+ *
+ * Distinctness is a proxy for "the reason is about the activity it sits
+ * under". It is a cheap one, and it is the half a machine can check: a
+ * sentence written for skiing does not also read as a sentence about a museum.
+ *
+ * Whitespace and case are normalised, so two cards differing only in how they
+ * were formatted still count as the same sentence.
+ */
+export function sharedReasonings(
+  entries: ReadonlyArray<{ activity: Activity; reasoning: string }>,
+): { reasoning: string; activities: Activity[] }[] {
+  const groups = new Map<string, { reasoning: string; activities: Activity[] }>();
+  for (const entry of entries) {
+    const key = entry.reasoning.trim().toLowerCase().replace(/\s+/g, ' ');
+    const group = groups.get(key) ?? { reasoning: entry.reasoning, activities: [] };
+    group.activities.push(entry.activity);
+    groups.set(key, group);
+  }
+  return [...groups.values()].filter((group) => group.activities.length > 1);
+}
+
 /** Latency budgets, expressed from the front-end experience backwards. */
 export const LATENCY_BUDGET_MS = {
   /** Typeahead: fires on every keystroke, must feel instant. */

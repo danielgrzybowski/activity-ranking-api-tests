@@ -26,6 +26,19 @@ Feature: The shape of a seven-day activity ranking
     And every reasoning is at most 160 characters
     And every reasoning gives a reason the user can act on
 
+  Scenario: Each activity carries its own reason, not one weather summary
+    The cheapest thing to build is one sentence about the day repeated under
+    all four cards: inside the length budget, naming a real weather driver,
+    and passing every other rule in this file. What the user reads is "Indoor
+    Sightseeing - FAIR - grey at 16C with 1.2mm of rain", which is a weather
+    report standing where a reason should be, and leaves them unable to tell
+    why one activity beat another.
+
+    When I request rankings for location id "3027301"
+    Then the response status is 200
+    And no two activities on a day share the same reasoning
+    And every reasoning gives a reason the user can act on
+
   Scenario: Ranks run 1 to 4, by score, with ties broken alphabetically
     Without a stated tie-break, two equally-good activities would swap places
     between refreshes and the list would look unstable to the user.

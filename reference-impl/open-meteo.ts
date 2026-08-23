@@ -9,7 +9,7 @@ import type { DailyWeather } from './scoring';
 export interface Place {
   id: string;
   name: string;
-  country: string;
+  country: string | null;
   countryCode: string;
   region: string | null;
   latitude: number;
@@ -140,7 +140,7 @@ function toPlace(r: GeoResult): Place {
   return {
     id: String(r.id),
     name: r.name,
-    country: r.country ?? '',
+    country: r.country ?? null,
     countryCode: r.country_code ?? '',
     region: r.admin1 ?? null,
     latitude: r.latitude,
@@ -205,6 +205,38 @@ export async function searchPlaces(name: string, limit: number): Promise<Place[]
   // after the list has been trimmed rather than on everything upstream sent.
   const labels = disambiguate(visible);
   return visible.map((r) => ({ ...toPlace(r), displayName: labels.get(r.id)! }));
+}
+
+/**
+ * Accent- and case-insensitive, because "zurich" and "Zurich" are what people
+ * type for Zurich. Nothing else is normalised away: "100 Mile House",
+ * "N'Djamena" and "'s-Hertogenbosch" are real names, and stripping their
+ * punctuation would make them unreachable.
+ */
+const normaliseName = (value: string): string =>
+  value.normalize('NFD').replace(/\p{Diacritic}/gu, '').trim().toLowerCase();
+
+/**
+ * Enough headroom that the exact matches are not pushed off the end by more
+ * populous places that merely start with the same letters.
+ */
+const CITY_MATCH_LIMIT = 20;
+
+/**
+ * Places whose name *is* what the caller typed, not merely places whose name
+ * starts with it.
+ *
+ * Open-Meteo's geocoding is a prefix search, which is exactly right for the
+ * typeahead and exactly wrong here: `city` is the shortcut for a name the user
+ * has already settled on, so "Cham" has to mean Cham and not Chamonix. Passing
+ * the prefix results straight through would rank whichever of the two the
+ * upstream happened to sort first, and the user would never learn which.
+ */
+export async function findPlacesNamed(name: string): Promise<Place[]> {
+  const wanted = normaliseName(name);
+  const candidates = await searchPlaces(name, CITY_MATCH_LIMIT);
+  if (mutated('prefix_match_city')) return candidates;
+  return candidates.filter((place) => normaliseName(place.name) === wanted);
 }
 
 export async function getPlace(id: string): Promise<Place | undefined> {

@@ -6,6 +6,7 @@ import {
   expectedRankOrder,
   explainsVerdict,
   ratingForScore,
+  sharedReasonings,
 } from './domain';
 import { RankingsResponseSchema, type RankingsResponse } from './schemas';
 
@@ -68,6 +69,14 @@ export function assertRankingInvariants(rankings: RankingsResponse): void {
             `place cannot support the activity at all - say that instead.`,
         );
       }
+    }
+
+    for (const shared of sharedReasonings(day.activities)) {
+      fail(
+        `${shared.activities.join(' and ')} are explained by the same sentence on ${day.date}: ` +
+          `"${shared.reasoning}". One weather summary under every card passes every other rule ` +
+          `here and still tells the user nothing about why one activity beat another.`,
+      );
     }
 
     const indoor = day.activities.find((a) => a.activity === 'INDOOR_SIGHTSEEING');
