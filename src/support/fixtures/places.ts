@@ -3,7 +3,7 @@ import type { GeoPlace } from '../fake-open-meteo';
 /**
  * The geocoding catalogue most scenarios start from. Chosen to cover the
  * cases a front end has to survive: three real Londons, an accented name,
- * a ski town, and a surf town.
+ * a ski town, a surf town, and one place that is both.
  *
  * The order here is deliberately *not* population order. The double serves
  * the catalogue in the order it is given, so a scenario that asserts "most
@@ -113,5 +113,22 @@ export const DEFAULT_PLACES: GeoPlace[] = [
     longitude: -4.54376,
     timezone: 'Europe/London',
     population: 9222,
+  },
+  {
+    // The only place here with both a coast and a ski area, and so the only
+    // one where all four activities are scored on the weather rather than
+    // one of them being ruled out by geography. Narvikfjellet's lower lift
+    // stands about a kilometre from Ofotfjord. Nothing in the ticket says a
+    // place has to be either a ski town or a surf town, and the rest of this
+    // catalogue quietly implies it does.
+    id: 3144987,
+    name: 'Narvik',
+    admin1: 'Nordland',
+    country: 'Norway',
+    country_code: 'NO',
+    latitude: 68.43838,
+    longitude: 17.4272,
+    timezone: 'Europe/Oslo',
+    population: 14141,
   },
 ];

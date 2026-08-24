@@ -27,6 +27,7 @@ const COASTLINE: ReadonlyArray<[number, number]> = [
   [43.483, -1.559], [49.494, 0.107], [43.696, 7.266], // France
   [44.407, 8.934], [52.106, 4.275], [54.9, 8.32], // Italy, Netherlands, Germany
   [36.962, -122.021], [41.036, -71.945], // United States
+  [68.438, 17.427], // Narvik, on Ofotfjord
 ];
 
 const SKI_AREAS: ReadonlyArray<[number, number]> = [
@@ -34,6 +35,7 @@ const SKI_AREAS: ReadonlyArray<[number, number]> = [
   [46.021, 7.749], [47.092, 9.283], // Zermatt, Flumserberg
   [47.446, 12.392], // Kitzbuhel
   [50.116, -122.955], [39.188, -106.818], // Whistler, Aspen
+  [68.439, 17.449], // Narvikfjellet, a kilometre above the fjord
 ];
 
 const toRadians = (degrees: number): number => (degrees * Math.PI) / 180;

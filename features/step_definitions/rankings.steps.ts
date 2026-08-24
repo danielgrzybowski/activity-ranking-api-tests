@@ -491,6 +491,43 @@ Then(
   },
 );
 
+/**
+ * One day, whole, in the order the user reads it.
+ *
+ * Every other verdict assertion here names a single activity, which is enough
+ * to catch a wrong rating but never shows what the screen actually says. The
+ * failure message prints both cards for the same reason: a diff of four lines
+ * tells you which activity moved, where "expected GOOD, got FAIR" does not.
+ */
+Then('on day {int} the ranking reads:', async ({ api }, dayNumber: number, table: DataTable) => {
+  const dayRanking = day(api.rankings(), dayNumber);
+
+  const card = (rows: ReadonlyArray<{ rank: number; activity: string; rating: string }>): string =>
+    [...rows]
+      .sort((a, b) => a.rank - b.rank)
+      .map((row) => `${row.rank}. ${row.activity} - ${row.rating}`)
+      .join('\n    ');
+
+  const expected = table.hashes().map((row) => ({
+    rank: Number.parseInt(row['rank'] ?? '', 10),
+    activity: assertActivity(row['activity'] ?? ''),
+    rating: assertRating(row['rating'] ?? ''),
+  }));
+
+  expectTrue(
+    expected.length === dayRanking.activities.length,
+    `The table lists ${expected.length} activities; day ${dayNumber} has ` +
+      `${dayRanking.activities.length}. ${describeDay(dayRanking)}`,
+  );
+  expectTrue(
+    card(expected) === card(dayRanking.activities),
+    `Day ${dayNumber} (${dayRanking.date}) does not read as specified.\n` +
+      `  expected:\n    ${card(expected)}\n` +
+      `  actual:\n    ${card(dayRanking.activities)}\n` +
+      `  scores: ${describeDay(dayRanking)}`,
+  );
+});
+
 Then(
   'on day {int} no activity is rated {string}',
   async ({ api }, dayNumber: number, ratingName: string) => {

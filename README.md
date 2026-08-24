@@ -4,7 +4,7 @@ A Gherkin/TypeScript specification for the **Activity Ranking API**: search for 
 pick one of the matches, get seven days ranked across Skiing, Surfing, Outdoor Sightseeing and
 Indoor Sightseeing, each with a suitability and a plain-English reason.
 
-The API does not exist yet. `npm test` is **red on purpose** — 62 scenarios (92 with `Scenario
+The API does not exist yet. `npm test` is **red on purpose** — 63 scenarios (93 with `Scenario
 Outline` examples expanded) describing the API someone is about to build.
 
 ```bash
@@ -58,6 +58,13 @@ differ in that factor alone: `ALPINE_POWDER_DAY` / `LIGHT_SNOW_DAY` / `COLD_DRY_
 constant temperature and wind. The location counts as a variable too — the same `CLEAN_SWELL_DAY` is
 `EXCELLENT` at Bude and `UNSUITABLE` at Chamonix.
 
+**One scenario reads the day whole.** Every other verdict is asserted an activity at a time, which
+catches a wrong rating but never shows what the screen says. "A whole day, read top to bottom" pins
+all four rows of one card, in order, at Narvik — the only place in the catalogue with both a coast
+and a ski area, and so the only one where all four activities are scored on the forecast rather than
+one of them being struck out by geography. Nothing in the ticket says a town has to be either a ski
+town or a surf town, and the rest of the fixtures quietly imply it does.
+
 **Some rules can't be reached by a scenario that names them** — the alphabetical tie-break only
 matters when two activities happen to tie. `src/support/invariants.ts` runs against every 200 the
 suite receives: rank contiguity, score↔rating agreement, the reasoning budget, that every reasoning
@@ -65,7 +72,7 @@ names a weather driver or says why the place rules the activity out, that no two
 are explained by the same sentence, the indoor floor, and that geography rules an activity out for
 the whole week or not at all.
 
-**How I know the red state is a good one.** `demo:green` runs all 92 scenarios against
+**How I know the red state is a good one.** `demo:green` runs all 93 scenarios against
 `reference-impl/` and they pass. `mutation-run` then breaks that implementation twelve ways — a 429
 reported as a 502, ambiguity resolved silently, the tie-break reversed, and nine more — and counts
 the scenarios that notice. All twelve are caught.
@@ -226,7 +233,7 @@ and a place with no region, population or country omits those keys rather than s
 rather than on a commit. `@live` covers payload drift: the double could stop resembling Open-Meteo
 and every other test would still pass. `npm run verify-fixtures` covers the other half — the places
 themselves. Every pinned id is looked up in the live catalogue and compared, because the double
-serves whatever the fixture says, so a made-up town is invisible to all 92 scenarios at once. It has
+serves whatever the fixture says, so a made-up town is invisible to all 93 scenarios at once. It has
 caught four: an id that is an air base in Murcia, a `Zürich` the English catalogue spells `Zurich`,
 coordinates 137 km from the town they name, and a Nazaré pinned as having no region when the entire
 scenario built on it depends on that being true. The identity of a place is an error; a population

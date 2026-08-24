@@ -26,6 +26,31 @@ Feature: The shape of a seven-day activity ranking
     And every reasoning is at most 160 characters
     And every reasoning gives a reason the user can act on
 
+  Scenario: A whole day, read top to bottom
+    Every other verdict in this suite is asserted one activity at a time,
+    which catches a wrong rating but never shows what the screen says. This
+    is the day as the user meets it.
+
+    Narvik is the only place in the catalogue with both a coast and a ski
+    area, so it is the only one where all four activities are scored on the
+    forecast rather than one of them being struck out by geography. Nothing
+    in the ticket says a town has to be either a ski town or a surf town,
+    and the rest of these fixtures quietly imply it does.
+
+    6cm of new snow at -3C: ski it, or go inside. The sea is too cold to
+    surf in and the streets are no way to spend the day.
+
+    Given day 1 of the forecast for "Narvik" is "LIGHT_SNOW_DAY"
+    When I request rankings for location id "3144987"
+    Then on day 1 the ranking reads:
+      | rank | activity            | rating     |
+      | 1    | INDOOR_SIGHTSEEING  | EXCELLENT  |
+      | 2    | SKIING              | GOOD       |
+      | 3    | SURFING             | POOR       |
+      | 4    | OUTDOOR_SIGHTSEEING | UNSUITABLE |
+    And "SKIING" is scored on the weather, not ruled out by the location
+    And "SURFING" is scored on the weather, not ruled out by the location
+
   Scenario: Each activity carries its own reason, not one weather summary
     The cheapest thing to build is one sentence about the day repeated under
     all four cards: inside the length budget, naming a real weather driver,
